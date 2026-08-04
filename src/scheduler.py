@@ -97,9 +97,16 @@ async def run_nightly_snapshot_and_cleanup(bot: Bot, target_user_id: int, memory
 
 def create_scheduler(bot: Bot, target_user_id: int, memory_engine: MemoryEngine, llm_client: LLMClient) -> AsyncIOScheduler:
     """
-    Initialize and return APScheduler instance configured for daily 09:00, 21:00, 23:59, and 15-min proactive triggers.
+    Initialize and return APScheduler instance configured for daily 09:00, Evening Sync (EVENING_SYNC_TIME), 23:59, and 15-min proactive triggers.
     """
+    import os
     scheduler = AsyncIOScheduler()
+
+    evening_sync_str = os.getenv("EVENING_SYNC_TIME", "21:00").strip()
+    try:
+        eh, em = map(int, evening_sync_str.split(":"))
+    except Exception:
+        eh, em = 21, 0
     
     # 09:00 Morning Briefing
     scheduler.add_job(
@@ -112,12 +119,12 @@ def create_scheduler(bot: Bot, target_user_id: int, memory_engine: MemoryEngine,
         replace_existing=True
     )
     
-    # 21:00 Evening Sync
+    # Evening Sync (EVENING_SYNC_TIME, default 21:00)
     scheduler.add_job(
         send_evening_reflection,
         trigger="cron",
-        hour=21,
-        minute=0,
+        hour=eh,
+        minute=em,
         args=[bot, target_user_id, memory_engine, llm_client],
         id="evening_reflection_job",
         replace_existing=True
