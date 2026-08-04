@@ -322,10 +322,20 @@ def _fallback_yaml_search(query: str, top_k: int = 4) -> List[Dict[str, Any]]:
     matches = sorted(matches, key=lambda x: x.get("weight", 1.0), reverse=True)
     return matches[:top_k]
 
+# In-memory sliding chat history fallback (user_id -> List[Dict[str, str]])
+_in_memory_chat_history: Dict[int, List[Dict[str, str]]] = {}
+
 def save_chat_message(user_id: int, role: str, content: str) -> None:
-    """Save user or assistant chat turn into chat_history table."""
+    """Save user or assistant chat turn into chat_history table with in-memory fallback."""
     if not user_id or not content:
         return
+
+    # Always maintain in-memory sliding history
+    if user_id not in _in_memory_chat_history:
+        _in_memory_chat_history[user_id] = []
+    _in_memory_chat_history[user_id].append({"role": role, "content": content})
+    if len(_in_memory_chat_history[user_id]) > 20:
+        _in_memory_chat_history[user_id] = _in_memory_chat_history[user_id][-20:]
 
     conn = _get_connection()
     if not conn:
@@ -346,32 +356,34 @@ def save_chat_message(user_id: int, role: str, content: str) -> None:
 def get_recent_chat_history(user_id: int, limit: int = 8) -> List[Dict[str, str]]:
     """
     Retrieve the last `limit` chat turns for user_id in chronological order.
-    Returns list of {"role": "user"|"assistant", "content": "..."}.
+    Uses PostgreSQL if available, otherwise falls back to in-memory history.
     """
     if not user_id:
         return []
 
     conn = _get_connection()
-    if not conn:
-        return []
+    if conn:
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT role, content FROM (
+                        SELECT role, content, id FROM chat_history
+                        WHERE user_id = %s
+                        ORDER BY id DESC
+                        LIMIT %s
+                    ) sub ORDER BY id ASC;
+                """, (user_id, limit))
+                rows = cur.fetchall()
+                if rows:
+                    return [{"role": r[0], "content": r[1]} for r in rows]
+        except Exception as e:
+            logger.warning(f"Failed to retrieve chat history from PostgreSQL: {e}")
+        finally:
+            conn.close()
 
-    try:
-        with conn.cursor() as cur:
-            cur.execute("""
-                SELECT role, content FROM (
-                    SELECT role, content, id FROM chat_history
-                    WHERE user_id = %s
-                    ORDER BY id DESC
-                    LIMIT %s
-                ) sub ORDER BY id ASC;
-            """, (user_id, limit))
-            rows = cur.fetchall()
-            return [{"role": r[0], "content": r[1]} for r in rows]
-    except Exception as e:
-        logger.warning(f"Failed to retrieve chat history from PostgreSQL: {e}")
-        return []
-    finally:
-        conn.close()
+    # In-memory fallback
+    mem_hist = _in_memory_chat_history.get(user_id, [])
+    return mem_hist[-limit:] if mem_hist else []
 
 def delete_tier3_memory_by_keyword(keyword: str) -> int:
     """Delete Tier 3 memory items matching keyword from PostgreSQL table."""
