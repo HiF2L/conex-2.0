@@ -294,7 +294,7 @@ def register_handlers(router: Router, memory_engine: MemoryEngine, llm_client: L
         system_prompt, trace = memory_engine.assemble_prompt(transcription)
 
         # 3. Generate coaching response for transcribed text with tool search & history
-        response = llm_client.generate_coaching_response(system_prompt, transcription, chat_history=chat_history)
+        response = llm_client.generate_coaching_response(system_prompt, transcription, chat_history=chat_history, memory_engine=memory_engine)
 
         # 4. Save dialogue turns to PostgreSQL
         save_chat_message(user_id, "user", f"[Voice Note]: {transcription}")
@@ -339,7 +339,7 @@ def register_handlers(router: Router, memory_engine: MemoryEngine, llm_client: L
         system_prompt, trace = memory_engine.assemble_prompt(user_text)
 
         # 3. Generate coaching response with tool search & history
-        response = llm_client.generate_coaching_response(system_prompt, user_text, chat_history=chat_history)
+        response = llm_client.generate_coaching_response(system_prompt, user_text, chat_history=chat_history, memory_engine=memory_engine)
 
         # 4. Save dialogue turns to PostgreSQL
         save_chat_message(user_id, "user", user_text)

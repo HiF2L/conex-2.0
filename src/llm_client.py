@@ -48,15 +48,16 @@ class LLMClient:
         self, 
         system_prompt: str, 
         user_input: str, 
-        chat_history: Optional[List[Dict[str, str]]] = None
+        chat_history: Optional[List[Dict[str, str]]] = None,
+        memory_engine: Optional[Any] = None
     ) -> str:
         """
         Generate coaching agent response using DEFAULT_MODEL.
-        Supports sliding conversation history and OpenAI Function Calling for search_memory tool.
+        Supports sliding conversation history and OpenAI Function Calling for search_memory and forget_memory tools.
         """
         from src.db import search_tier3_memory
 
-        tool_definition = {
+        search_tool = {
             "type": "function",
             "function": {
                 "name": "search_memory",
@@ -74,6 +75,31 @@ class LLMClient:
             }
         }
 
+        forget_tool = {
+            "type": "function",
+            "function": {
+                "name": "forget_memory",
+                "description": "Explicitly delete or remove outdated or resolved QA pairs from Tier 2 state or Tier 3 entity memory when requested by the user.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "target_tier": {
+                            "type": "string",
+                            "enum": ["tier2", "tier3", "all"],
+                            "description": "Memory tier to clean ('tier2', 'tier3', or 'all')."
+                        },
+                        "keyword": {
+                            "type": "string",
+                            "description": "Keyword, topic, entity name, or item ID to match and delete."
+                        }
+                    },
+                    "required": ["target_tier", "keyword"]
+                }
+            }
+        }
+
+        tools = [search_tool, forget_tool]
+
         if self.is_api_configured():
             try:
                 # Construct messages payload: system prompt + sliding chat history + current user message
@@ -88,19 +114,20 @@ class LLMClient:
                 response = self.client.chat.completions.create(
                     model=self.default_model,
                     messages=messages,
-                    tools=[tool_definition],
+                    tools=tools,
                     tool_choice="auto",
                     temperature=0.7
                 )
                 
                 choice = response.choices[0]
 
-                # Check if model requested tool call (search_memory)
+                # Check if model requested tool call (search_memory / forget_memory)
                 if choice.message.tool_calls:
                     messages.append(choice.message) # append assistant tool request
                     
                     for tool_call in choice.message.tool_calls:
-                        if tool_call.function.name == "search_memory":
+                        fn_name = tool_call.function.name
+                        if fn_name == "search_memory":
                             try:
                                 args = json.loads(tool_call.function.arguments)
                                 query = args.get("query", user_input)
@@ -116,7 +143,24 @@ class LLMClient:
                                 "content": search_results
                             })
 
-                    # Second call to generate final answer using search results
+                        elif fn_name == "forget_memory" and memory_engine:
+                            try:
+                                args = json.loads(tool_call.function.arguments)
+                                target_tier = args.get("target_tier", "tier2")
+                                keyword = args.get("keyword", "")
+                            except Exception:
+                                target_tier, keyword = "tier2", user_input
+                            
+                            logger.info(f"LLM triggered tool forget_memory(target_tier='{target_tier}', keyword='{keyword}')")
+                            forget_results = memory_engine.forget_memory(target_tier, keyword)
+
+                            messages.append({
+                                "role": "tool",
+                                "tool_call_id": tool_call.id,
+                                "content": forget_results
+                            })
+
+                    # Second call to generate final answer using tool execution results
                     final_response = self.client.chat.completions.create(
                         model=self.default_model,
                         messages=messages,
@@ -154,7 +198,9 @@ class LLMClient:
                 "You MUST create separate entry keys in 'tier3_updates' for each entity (e.g., 'tier3_updates': {'wegeny': [...], 'health': [...]}). "
                 "Do NOT lump project-specific facts into Tier 1 or Tier 2.\n"
                 "3. Tier 1 is ONLY for static core identity/values/communication preferences.\n"
-                "4. Tier 2 is ONLY for current energy level, overall sprint goal, and immediate blockers.\n\n"
+                "4. Tier 2 is ONLY for current energy level, overall sprint goal, and immediate blockers.\n"
+                "5. DEDUPLICATION & REPLACEMENT: If new user information updates, replaces, or contradicts an existing Tier 2 item, place the ID of the old Tier 2 item in 'deletions' to prevent duplicates.\n"
+                "6. PROMOTION TO TIER 3: If a task or idea matures into a specific project feature, create an entry in 'tier3_updates[entity]' and list the old Tier 2 item ID in 'deletions'.\n\n"
                 "Return a strict JSON object matching MemoryDiff schema:\n"
                 "{\n"
                 '  "tier1_updates": [{"id": str, "question": str, "answer": str, "weight": float, "confidence": float, "origin": str, "valid_from": str, "valid_until": str|null}],\n'

@@ -372,3 +372,31 @@ def get_recent_chat_history(user_id: int, limit: int = 8) -> List[Dict[str, str]
         return []
     finally:
         conn.close()
+
+def delete_tier3_memory_by_keyword(keyword: str) -> int:
+    """Delete Tier 3 memory items matching keyword from PostgreSQL table."""
+    clean_kw = keyword.strip()
+    if not clean_kw:
+        return 0
+
+    conn = _get_connection()
+    if not conn:
+        return 0
+
+    deleted_count = 0
+    try:
+        with conn.cursor() as cur:
+            like_pattern = f"%{clean_kw}%"
+            cur.execute("""
+                DELETE FROM tier3_memory_index
+                WHERE entity_name ILIKE %s OR question ILIKE %s OR answer ILIKE %s OR id ILIKE %s;
+            """, (like_pattern, like_pattern, like_pattern, like_pattern))
+            deleted_count = cur.rowcount
+            conn.commit()
+            logger.info(f"Deleted {deleted_count} Tier 3 memory entries from PostgreSQL matching '{clean_kw}'.")
+            return deleted_count
+    except Exception as e:
+        logger.warning(f"Failed to delete Tier 3 memory from PostgreSQL: {e}")
+        return 0
+    finally:
+        conn.close()

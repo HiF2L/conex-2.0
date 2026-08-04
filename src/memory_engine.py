@@ -255,3 +255,106 @@ class MemoryEngine:
 
         # Reload memory state to keep memory engine in sync
         self.load_memory()
+
+    def save_nightly_snapshot(self, history_dir: str = "data/memory/history") -> str:
+        """
+        Backs up current tier2_state.yaml to data/memory/history/YYYY-MM-DD.yaml.
+        """
+        today_str = datetime.date.today().isoformat()
+        h_dir = Path(history_dir)
+        h_dir.mkdir(parents=True, exist_ok=True)
+        snapshot_file = h_dir / f"{today_str}.yaml"
+
+        self._write_yaml_file_safely(snapshot_file, self.tier2_items)
+        logger.info(f"Saved nightly memory snapshot: {snapshot_file}")
+        return str(snapshot_file)
+
+    def cleanup_tier2_garbage(self) -> int:
+        """
+        Cleans up resolved one-off tasks and low-weight items (< 0.2) from Tier 2.
+        Preserves ongoing multi-day goals and blockers.
+        """
+        initial_count = len(self.tier2_items)
+        cleaned_items = []
+
+        completion_markers = ["done", "completed", "resolved", "finished", "cancelled"]
+
+        for item in self.tier2_items:
+            # Drop items with weight < 0.2 or marked as done/completed
+            lower_ans = item.answer.lower()
+            lower_q = item.question.lower()
+            
+            is_completed = any(m in lower_ans for m in completion_markers) or any(m in lower_q for m in completion_markers)
+            is_low_weight = item.weight < 0.2
+
+            if not is_completed and not is_low_weight:
+                cleaned_items.append(item)
+
+        removed_count = initial_count - len(cleaned_items)
+        if removed_count > 0:
+            self.tier2_items = cleaned_items
+            self._write_yaml_file_safely(self.tier2_path, self.tier2_items)
+            logger.info(f"Cleaned up {removed_count} garbage/completed items from Tier 2 state.")
+
+        return removed_count
+
+    def forget_memory(self, target_tier: str, keyword: str) -> str:
+        """
+        Explicitly removes QA items matching keyword from Tier 2 or Tier 3 memory (and PostgreSQL index).
+        """
+        from src.db import delete_tier3_memory_by_keyword
+        clean_kw = keyword.strip().lower()
+        if not clean_kw:
+            return "No keyword provided for deletion."
+
+        removed_t2 = 0
+        removed_t3 = 0
+        target_tier_lower = target_tier.lower().strip()
+
+        # Tier 2 Removal
+        if target_tier_lower in ["tier2", "t2", "all"]:
+            original_t2_len = len(self.tier2_items)
+            self.tier2_items = [
+                qa for qa in self.tier2_items
+                if clean_kw not in qa.question.lower() 
+                and clean_kw not in qa.answer.lower()
+                and clean_kw not in qa.id.lower()
+            ]
+            removed_t2 = original_t2_len - len(self.tier2_items)
+            if removed_t2 > 0:
+                self._write_yaml_file_safely(self.tier2_path, self.tier2_items)
+
+        # Tier 3 Removal
+        if target_tier_lower in ["tier3", "t3", "all"]:
+            for entity_name, qa_list in list(self.tier3_entities.items()):
+                # If keyword matches entity name, delete whole file
+                if clean_kw == entity_name or clean_kw in entity_name:
+                    removed_t3 += len(qa_list)
+                    self.tier3_entities[entity_name] = []
+                    entity_file = self.tier3_dir / f"{entity_name}.yaml"
+                    if entity_file.exists():
+                        entity_file.unlink()
+                else:
+                    # Filter items in entity file
+                    orig_len = len(qa_list)
+                    filtered = [
+                        qa for qa in qa_list
+                        if clean_kw not in qa.question.lower()
+                        and clean_kw not in qa.answer.lower()
+                        and clean_kw not in qa.id.lower()
+                    ]
+                    if len(filtered) < orig_len:
+                        removed_t3 += (orig_len - len(filtered))
+                        self.tier3_entities[entity_name] = filtered
+                        entity_file = self.tier3_dir / f"{entity_name}.yaml"
+                        self._write_yaml_file_safely(entity_file, filtered)
+
+            # Sync PostgreSQL deletion
+            db_deleted = delete_tier3_memory_by_keyword(clean_kw)
+            logger.info(f"PostgreSQL Tier 3 deletion for '{clean_kw}' removed {db_deleted} DB rows.")
+
+        self.load_memory()
+        return (
+            f"Successfully removed memory matching '{keyword}': "
+            f"{removed_t2} Tier 2 state items and {removed_t3} Tier 3 entity items deleted."
+        )

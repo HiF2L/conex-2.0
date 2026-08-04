@@ -53,9 +53,18 @@ async def send_evening_reflection(bot: Bot, target_user_id: int, memory_engine: 
 
     await send_safe_bot_message(bot, target_user_id, reflection_text, parse_mode="Markdown")
 
+async def run_nightly_snapshot_and_cleanup(bot: Bot, target_user_id: int, memory_engine: MemoryEngine):
+    """23:59 Nightly Memory History Snapshot & Smart T2 Garbage Collection."""
+    try:
+        snapshot_path = memory_engine.save_nightly_snapshot()
+        cleaned_count = memory_engine.cleanup_tier2_garbage()
+        logger.info(f"Nightly snapshot completed ({snapshot_path}), cleaned {cleaned_count} items from Tier 2.")
+    except Exception as e:
+        logger.error(f"Nightly snapshot job failed: {e}")
+
 def create_scheduler(bot: Bot, target_user_id: int, memory_engine: MemoryEngine, llm_client: LLMClient) -> AsyncIOScheduler:
     """
-    Initialize and return APScheduler instance configured for daily 09:00 and 21:00 triggers.
+    Initialize and return APScheduler instance configured for daily 09:00, 21:00, and 23:59 triggers.
     """
     scheduler = AsyncIOScheduler()
     
@@ -78,6 +87,17 @@ def create_scheduler(bot: Bot, target_user_id: int, memory_engine: MemoryEngine,
         minute=0,
         args=[bot, target_user_id, memory_engine, llm_client],
         id="evening_reflection_job",
+        replace_existing=True
+    )
+
+    # 23:59 Nightly Memory Snapshot & Garbage Collection
+    scheduler.add_job(
+        run_nightly_snapshot_and_cleanup,
+        trigger="cron",
+        hour=23,
+        minute=59,
+        args=[bot, target_user_id, memory_engine],
+        id="nightly_memory_snapshot_job",
         replace_existing=True
     )
     
