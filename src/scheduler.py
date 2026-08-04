@@ -42,16 +42,49 @@ async def send_morning_briefing(bot: Bot, target_user_id: int, memory_engine: Me
     await send_safe_bot_message(bot, target_user_id, full_message, parse_mode="Markdown")
 
 async def send_evening_reflection(bot: Bot, target_user_id: int, memory_engine: MemoryEngine, llm_client: LLMClient):
-    """21:00 Proactive Evening Reflection."""
+    """21:00 Consolidated Evening Sync Protocol."""
     if not target_user_id:
         return
     
-    reflection_text = (
-        "🌆 **Evening Reflection (21:00)**\n\n"
-        "How did your sprint progress today? Send a quick text or voice dump with your wins, blockers, or mindset updates to update your 3-Tier memory!"
+    # 1. Assemble current active sprint state from Tier 2
+    prompt, trace = memory_engine.assemble_prompt("Evening Sync task review and atomic planning for tomorrow.")
+    
+    sync_query = (
+        "Generate a SINGLE consolidated 21:00 Evening Sync message formatted as follows:\n"
+        "1. List all active planned sprint tasks/goals for today in a consolidated list.\n"
+        "2. Ask the user what succeeded, what was blocked, and why.\n"
+        "3. Prompt the user to select 1 atomic micro-step (15–30 mins) for tomorrow to guarantee momentum."
+    )
+    
+    try:
+        response = llm_client.generate_coaching_response(prompt, sync_query)
+    except Exception as e:
+        logger.warning(f"LLM call for Evening Sync failed: {e}. Using fallback format.")
+        response = (
+            "Let's review your sprint progress for today!\n\n"
+            "1. What tasks succeeded today?\n"
+            "2. Were there any blockers or energy drains?\n"
+            "3. Select **1 atomic micro-step (15–30 mins)** to execute first thing tomorrow morning!"
+        )
+    
+    full_message = (
+        f"🌆 **Evening Sync (21:00)**\n\n"
+        f"{response}\n\n"
+        f"_🧠 [Memory Trace: T1: {trace.t1_count} Qs | T2: {trace.t2_count} Qs | T3: {trace.t3_total} Qs | ~{trace.estimated_tokens} tokens]_"
     )
 
-    await send_safe_bot_message(bot, target_user_id, reflection_text, parse_mode="Markdown")
+    await send_safe_bot_message(bot, target_user_id, full_message, parse_mode="Markdown")
+
+async def run_proactive_ping_checker(bot: Bot, target_user_id: int, memory_engine: MemoryEngine, llm_client: LLMClient):
+    """Periodic Proactive Push Engine checker running every 15 minutes."""
+    from src.proactive_engine import ProactiveEngine
+    try:
+        engine = ProactiveEngine()
+        executed_count = await engine.check_and_execute_pings(bot, target_user_id, llm_client)
+        if executed_count > 0:
+            logger.info(f"Proactive ping checker executed {executed_count} pings.")
+    except Exception as e:
+        logger.error(f"Proactive ping checker failed: {e}")
 
 async def run_nightly_snapshot_and_cleanup(bot: Bot, target_user_id: int, memory_engine: MemoryEngine):
     """23:59 Nightly Memory History Snapshot & Smart T2 Garbage Collection."""
@@ -64,7 +97,7 @@ async def run_nightly_snapshot_and_cleanup(bot: Bot, target_user_id: int, memory
 
 def create_scheduler(bot: Bot, target_user_id: int, memory_engine: MemoryEngine, llm_client: LLMClient) -> AsyncIOScheduler:
     """
-    Initialize and return APScheduler instance configured for daily 09:00, 21:00, and 23:59 triggers.
+    Initialize and return APScheduler instance configured for daily 09:00, 21:00, 23:59, and 15-min proactive triggers.
     """
     scheduler = AsyncIOScheduler()
     
@@ -79,7 +112,7 @@ def create_scheduler(bot: Bot, target_user_id: int, memory_engine: MemoryEngine,
         replace_existing=True
     )
     
-    # 21:00 Evening Reflection
+    # 21:00 Evening Sync
     scheduler.add_job(
         send_evening_reflection,
         trigger="cron",
@@ -98,6 +131,16 @@ def create_scheduler(bot: Bot, target_user_id: int, memory_engine: MemoryEngine,
         minute=59,
         args=[bot, target_user_id, memory_engine],
         id="nightly_memory_snapshot_job",
+        replace_existing=True
+    )
+
+    # Every 15 minutes Proactive Ping Checker
+    scheduler.add_job(
+        run_proactive_ping_checker,
+        trigger="cron",
+        minute="*/15",
+        args=[bot, target_user_id, memory_engine, llm_client],
+        id="proactive_ping_checker_job",
         replace_existing=True
     )
     

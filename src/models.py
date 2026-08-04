@@ -19,6 +19,16 @@ class QAPair(BaseModel):
     valid_until: Optional[str] = Field(default=None, description="ISO Date string when item expired/superseded")
 
 
+class ScheduledPingItem(BaseModel):
+    """
+    Scheduled follow-up event ping model.
+    """
+    id: Optional[str] = Field(default=None, description="Optional identifier for the scheduled ping")
+    scheduled_at: str = Field(..., description="ISO Timestamp (e.g. 2026-08-04T14:30:00) when ping should be triggered")
+    event_type: str = Field(default="event_followup", description="Event category (e.g. event_followup, meeting, doctor)")
+    context_text: str = Field(..., description="Details/context about the time-sensitive event")
+
+
 class MemoryDiff(BaseModel):
     """
     Structured extraction outcome representing changes to be committed to disk.
@@ -30,6 +40,7 @@ class MemoryDiff(BaseModel):
         description="Map of entity_name (e.g., 'wegeny', 'intelligence_bit', 'health', 'music', 'youtube', 'cleaning', 'lifeos') -> list of new/updated Tier 3 QA items"
     )
     deletions: List[str] = Field(default_factory=list, description="List of QA IDs to remove or invalidate")
+    scheduled_pings: List[ScheduledPingItem] = Field(default_factory=list, description="Extracted time-sensitive event pings")
 
 
 class MemoryTrace(BaseModel):

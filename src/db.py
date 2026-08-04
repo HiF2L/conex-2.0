@@ -8,6 +8,7 @@ import os
 import yaml
 import json
 import logging
+import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 from dotenv import load_dotenv
@@ -66,6 +67,20 @@ def init_db() -> bool:
                 CREATE INDEX IF NOT EXISTS idx_chat_history_user ON chat_history (user_id, id DESC);
             """)
 
+            # 3. Scheduled Pings table for Proactive Engine
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS scheduled_pings (
+                    id SERIAL PRIMARY KEY,
+                    user_id BIGINT NOT NULL,
+                    scheduled_at TIMESTAMP NOT NULL,
+                    event_type VARCHAR(50) NOT NULL DEFAULT 'event_followup',
+                    context_text TEXT NOT NULL,
+                    status VARCHAR(20) NOT NULL DEFAULT 'pending',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE INDEX IF NOT EXISTS idx_scheduled_pings_status ON scheduled_pings (status, scheduled_at);
+            """)
+
             # 3. Tier 3 memory index table with FTS tsvector and optional vector column
             if has_pgvector:
                 cur.execute("""
@@ -104,6 +119,140 @@ def init_db() -> bool:
         return False
     finally:
         conn.close()
+
+# In-memory fallback storage for scheduled pings when DB is offline
+_in_memory_scheduled_pings: List[Dict[str, Any]] = []
+
+def save_scheduled_ping(user_id: int, scheduled_at_iso: str, event_type: str, context_text: str) -> int:
+    """Saves a scheduled event ping for proactive follow-up."""
+    if not user_id or not scheduled_at_iso or not context_text:
+        return 0
+
+    ping_data = {
+        "id": len(_in_memory_scheduled_pings) + 1,
+        "user_id": user_id,
+        "scheduled_at": scheduled_at_iso,
+        "event_type": event_type or "event_followup",
+        "context_text": context_text,
+        "status": "pending",
+        "created_at": datetime.datetime.now().isoformat()
+    }
+    _in_memory_scheduled_pings.append(ping_data)
+
+    conn = _get_connection()
+    if not conn:
+        return ping_data["id"]
+
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                INSERT INTO scheduled_pings (user_id, scheduled_at, event_type, context_text, status)
+                VALUES (%s, %s, %s, %s, 'pending')
+                RETURNING id;
+            """, (user_id, scheduled_at_iso, event_type or "event_followup", context_text))
+            inserted_id = cur.fetchone()[0]
+            conn.commit()
+            return inserted_id
+    except Exception as e:
+        logger.warning(f"Failed to save scheduled ping to PostgreSQL: {e}")
+        return ping_data["id"]
+    finally:
+        conn.close()
+
+def get_due_pings(target_user_id: Optional[int] = None) -> List[Dict[str, Any]]:
+    """Retrieve pending pings scheduled at or before NOW()."""
+    now = datetime.datetime.now()
+    now_iso = now.isoformat()
+
+    conn = _get_connection()
+    if conn:
+        try:
+            with conn.cursor() as cur:
+                if target_user_id:
+                    cur.execute("""
+                        SELECT id, user_id, scheduled_at, event_type, context_text, status
+                        FROM scheduled_pings
+                        WHERE status = 'pending' AND scheduled_at <= %s AND user_id = %s
+                        ORDER BY scheduled_at ASC;
+                    """, (now, target_user_id))
+                else:
+                    cur.execute("""
+                        SELECT id, user_id, scheduled_at, event_type, context_text, status
+                        FROM scheduled_pings
+                        WHERE status = 'pending' AND scheduled_at <= %s
+                        ORDER BY scheduled_at ASC;
+                    """, (now,))
+                rows = cur.fetchall()
+                if rows:
+                    return [
+                        {
+                            "id": r[0],
+                            "user_id": r[1],
+                            "scheduled_at": str(r[2]),
+                            "event_type": r[3],
+                            "context_text": r[4],
+                            "status": r[5]
+                        }
+                        for r in rows
+                    ]
+        except Exception as e:
+            logger.warning(f"Failed to fetch due pings from PostgreSQL: {e}")
+        finally:
+            conn.close()
+
+    # In-memory fallback
+    due = []
+    for p in _in_memory_scheduled_pings:
+        if p["status"] == "pending" and p["scheduled_at"] <= now_iso:
+            if not target_user_id or p["user_id"] == target_user_id:
+                due.append(p)
+    return due
+
+def mark_ping_status(ping_id: int, status: str = "executed") -> None:
+    """Mark ping status as executed or cancelled."""
+    for p in _in_memory_scheduled_pings:
+        if p["id"] == ping_id:
+            p["status"] = status
+
+    conn = _get_connection()
+    if not conn:
+        return
+
+    try:
+        with conn.cursor() as cur:
+            cur.execute("""
+                UPDATE scheduled_pings SET status = %s WHERE id = %s;
+            """, (status, ping_id))
+            conn.commit()
+    except Exception as e:
+        logger.warning(f"Failed to update ping status in PostgreSQL: {e}")
+    finally:
+        conn.close()
+
+def get_pings_count_today(user_id: int) -> int:
+    """Get count of pings executed today for user_id."""
+    today_start = datetime.datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    today_start_iso = today_start.isoformat()
+
+    conn = _get_connection()
+    if conn:
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT COUNT(*) FROM scheduled_pings
+                    WHERE user_id = %s AND status = 'executed' AND scheduled_at >= %s;
+                """, (user_id, today_start))
+                return cur.fetchone()[0]
+        except Exception as e:
+            logger.warning(f"Failed to get pings count today from PostgreSQL: {e}")
+        finally:
+            conn.close()
+
+    # In-memory count
+    return sum(
+        1 for p in _in_memory_scheduled_pings
+        if p["user_id"] == user_id and p["status"] == "executed" and p["scheduled_at"] >= today_start_iso
+    )
 
 def sync_tier3_to_postgres(memory_dir: str = "data/memory") -> int:
     """

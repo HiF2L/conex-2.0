@@ -200,7 +200,8 @@ class LLMClient:
                 "3. Tier 1 is ONLY for static core identity/values/communication preferences.\n"
                 "4. Tier 2 is ONLY for current energy level, overall sprint goal, and immediate blockers.\n"
                 "5. DEDUPLICATION & REPLACEMENT: If new user information updates, replaces, or contradicts an existing Tier 2 item, place the ID of the old Tier 2 item in 'deletions' to prevent duplicates.\n"
-                "6. PROMOTION TO TIER 3: If a task or idea matures into a specific project feature, create an entry in 'tier3_updates[entity]' and list the old Tier 2 item ID in 'deletions'.\n\n"
+                "6. PROMOTION TO TIER 3: If a task or idea matures into a specific project feature, create an entry in 'tier3_updates[entity]' and list the old Tier 2 item ID in 'deletions'.\n"
+                "7. EVENT PING EXTRACTION: Identify any specific time-sensitive events mentioned by the user (e.g. 'Завтра в 11:00 иду к врачу', 'Meeting at 3pm'). Populate 'scheduled_pings': [{'scheduled_at': ISO_STR (2-3 hours after event), 'event_type': str, 'context_text': str}].\n\n"
                 "Return a strict JSON object matching MemoryDiff schema:\n"
                 "{\n"
                 '  "tier1_updates": [{"id": str, "question": str, "answer": str, "weight": float, "confidence": float, "origin": str, "valid_from": str, "valid_until": str|null}],\n'
