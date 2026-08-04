@@ -19,11 +19,17 @@ logger = logging.getLogger(__name__)
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://wegeny_admin:wegeny_password@localhost:5432/lifeos_db").strip()
 
 def _get_connection():
-    """Attempt to establish a psycopg 3 connection to PostgreSQL."""
+    """Attempt to establish a psycopg 3 or psycopg2 connection to PostgreSQL."""
     try:
         import psycopg
-        conn = psycopg.connect(DATABASE_URL, connect_timeout=3)
-        return conn
+        return psycopg.connect(DATABASE_URL, connect_timeout=3)
+    except ImportError:
+        try:
+            import psycopg2
+            return psycopg2.connect(DATABASE_URL, connect_timeout=3)
+        except Exception as e:
+            logger.debug(f"PostgreSQL psycopg2 connection failed: {e}")
+            return None
     except Exception as e:
         logger.debug(f"PostgreSQL connection offline: {e}")
         return None
