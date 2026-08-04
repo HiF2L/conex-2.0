@@ -132,7 +132,7 @@ class MemoryEngine:
 
         # Format Tier 2 QA
         prompt_lines.append("## TIER 2: DYNAMIC STATE & SPRINT GOALS (Always Loaded)")
-        t2_yaml_data = [{"question": qa.question, "answer": qa.answer, "weight": qa.weight} for qa in self.tier2_items]
+        t2_yaml_data = [{"id": qa.id, "question": qa.question, "answer": qa.answer, "weight": qa.weight} for qa in self.tier2_items]
         prompt_lines.append("```yaml")
         prompt_lines.append(yaml.dump(t2_yaml_data, sort_keys=False, allow_unicode=True).strip())
         prompt_lines.append("```\n")
@@ -144,7 +144,7 @@ class MemoryEngine:
             for entity_name, qa_list in matched_t3.items():
                 t3_trace_counts[entity_name] = len(qa_list)
                 prompt_lines.append(f"### Entity: {entity_name.upper()} (Top-{len(qa_list)} by Weight)")
-                t3_yaml_data = [{"question": qa.question, "answer": qa.answer, "weight": qa.weight} for qa in qa_list]
+                t3_yaml_data = [{"id": qa.id, "question": qa.question, "answer": qa.answer, "weight": qa.weight} for qa in qa_list]
                 prompt_lines.append("```yaml")
                 prompt_lines.append(yaml.dump(t3_yaml_data, sort_keys=False, allow_unicode=True).strip())
                 prompt_lines.append("```")
@@ -298,9 +298,37 @@ class MemoryEngine:
 
         return removed_count
 
+    def _is_match_for_deletion(self, qa: QAPair, clean_kw: str) -> bool:
+        """Determines if a QAPair matches the deletion keyword or phrase using multiple strategies."""
+        qid = qa.id.lower()
+        q_text = qa.question.lower()
+        a_text = qa.answer.lower()
+
+        # 1. Direct ID or Substring Match
+        if clean_kw in qid or clean_kw in q_text or clean_kw in a_text:
+            return True
+        if (len(q_text) > 5 and q_text in clean_kw) or (len(a_text) > 5 and a_text in clean_kw):
+            return True
+
+        # 2. Token Overlap Match for phrases
+        import re
+        kw_words = set(re.findall(r'\w{3,}', clean_kw))
+        if not kw_words:
+            return False
+
+        item_words = set(re.findall(r'\w{3,}', f"{qid} {q_text} {a_text}"))
+        if not item_words:
+            return False
+
+        overlap = kw_words.intersection(item_words)
+        # If at least 35% of significant words match or >= 3 distinct words match
+        overlap_ratio = len(overlap) / len(kw_words)
+        return overlap_ratio >= 0.35 or len(overlap) >= 3
+
     def forget_memory(self, target_tier: str, keyword: str) -> str:
         """
         Explicitly removes QA items matching keyword from Tier 2 or Tier 3 memory (and PostgreSQL index).
+        Supports exact item IDs, keywords, or phrase token overlap matching.
         """
         from src.db import delete_tier3_memory_by_keyword
         clean_kw = keyword.strip().lower()
@@ -316,9 +344,7 @@ class MemoryEngine:
             original_t2_len = len(self.tier2_items)
             self.tier2_items = [
                 qa for qa in self.tier2_items
-                if clean_kw not in qa.question.lower() 
-                and clean_kw not in qa.answer.lower()
-                and clean_kw not in qa.id.lower()
+                if not self._is_match_for_deletion(qa, clean_kw)
             ]
             removed_t2 = original_t2_len - len(self.tier2_items)
             if removed_t2 > 0:
@@ -339,9 +365,7 @@ class MemoryEngine:
                     orig_len = len(qa_list)
                     filtered = [
                         qa for qa in qa_list
-                        if clean_kw not in qa.question.lower()
-                        and clean_kw not in qa.answer.lower()
-                        and clean_kw not in qa.id.lower()
+                        if not self._is_match_for_deletion(qa, clean_kw)
                     ]
                     if len(filtered) < orig_len:
                         removed_t3 += (orig_len - len(filtered))
