@@ -98,7 +98,86 @@ class LLMClient:
             }
         }
 
-        tools = [search_tool, forget_tool]
+        create_project_tool = {
+            "type": "function",
+            "function": {
+                "name": "create_project",
+                "description": "Create a new project category in PostgreSQL Task Manager.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "name": {"type": "string", "description": "Unique name of the project (e.g. WeGeny, Health, LifeOS)"},
+                        "description": {"type": "string", "description": "Optional description of project goals"}
+                    },
+                    "required": ["name"]
+                }
+            }
+        }
+
+        create_task_tool = {
+            "type": "function",
+            "function": {
+                "name": "create_task",
+                "description": "Create a new task in PostgreSQL Task Manager.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "title": {"type": "string", "description": "Task title or action item"},
+                        "project_name": {"type": "string", "description": "Optional project category (e.g. WeGeny, LifeOS)"},
+                        "priority": {"type": "integer", "description": "Priority level (1: High, 2: Medium, 3: Low)", "default": 2},
+                        "due_date": {"type": "string", "description": "Optional due date ISO string (YYYY-MM-DD)"},
+                        "description": {"type": "string", "description": "Optional task details"}
+                    },
+                    "required": ["title"]
+                }
+            }
+        }
+
+        complete_task_tool = {
+            "type": "function",
+            "function": {
+                "name": "complete_task",
+                "description": "Mark a task as completed ('done') in PostgreSQL Task Manager by task ID or title match.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "identifier": {"type": "string", "description": "Task ID integer (e.g. '3') or task title substring"}
+                    },
+                    "required": ["identifier"]
+                }
+            }
+        }
+
+        list_tasks_tool = {
+            "type": "function",
+            "function": {
+                "name": "list_tasks",
+                "description": "List active pending tasks from PostgreSQL Task Manager.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "project_name": {"type": "string", "description": "Optional project name filter"}
+                    }
+                }
+            }
+        }
+
+        delete_task_tool = {
+            "type": "function",
+            "function": {
+                "name": "delete_task",
+                "description": "Delete a task from PostgreSQL Task Manager by ID or title match.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "identifier": {"type": "string", "description": "Task ID integer or title substring"}
+                    },
+                    "required": ["identifier"]
+                }
+            }
+        }
+
+        tools = [search_tool, forget_tool, create_project_tool, create_task_tool, complete_task_tool, list_tasks_tool, delete_task_tool]
 
         if self.is_api_configured():
             try:
@@ -121,7 +200,7 @@ class LLMClient:
                 
                 choice = response.choices[0]
 
-                # Check if model requested tool call (search_memory / forget_memory)
+                # Check if model requested tool call
                 if choice.message.tool_calls:
                     messages.append(choice.message) # append assistant tool request
                     
@@ -159,6 +238,62 @@ class LLMClient:
                                 "tool_call_id": tool_call.id,
                                 "content": forget_results
                             })
+
+                        elif fn_name == "create_project":
+                            from src.db import create_project_db
+                            try:
+                                args = json.loads(tool_call.function.arguments)
+                                res = create_project_db(args.get("name", ""), args.get("description", ""))
+                            except Exception as pe:
+                                res = {"error": str(pe)}
+                            logger.info(f"LLM triggered tool create_project: {res}")
+                            messages.append({"role": "tool", "tool_call_id": tool_call.id, "content": json.dumps(res, ensure_ascii=False)})
+
+                        elif fn_name == "create_task":
+                            from src.db import create_task_db
+                            try:
+                                args = json.loads(tool_call.function.arguments)
+                                res = create_task_db(
+                                    title=args.get("title", ""),
+                                    project_name=args.get("project_name"),
+                                    priority=int(args.get("priority", 2)),
+                                    due_date=args.get("due_date"),
+                                    description=args.get("description", "")
+                                )
+                            except Exception as te:
+                                res = {"error": str(te)}
+                            logger.info(f"LLM triggered tool create_task: {res}")
+                            messages.append({"role": "tool", "tool_call_id": tool_call.id, "content": json.dumps(res, ensure_ascii=False)})
+
+                        elif fn_name == "complete_task":
+                            from src.db import complete_task_db
+                            try:
+                                args = json.loads(tool_call.function.arguments)
+                                success = complete_task_db(args.get("identifier", ""))
+                            except Exception as ce:
+                                success = False
+                            logger.info(f"LLM triggered tool complete_task: success={success}")
+                            messages.append({"role": "tool", "tool_call_id": tool_call.id, "content": f"Task completion result: {success}"})
+
+                        elif fn_name == "list_tasks":
+                            from src.db import get_active_tasks_db
+                            try:
+                                args = json.loads(tool_call.function.arguments)
+                                tasks = get_active_tasks_db(args.get("project_name"))
+                            except Exception as le:
+                                tasks = []
+                            logger.info(f"LLM triggered tool list_tasks: found {len(tasks)} active tasks")
+                            messages.append({"role": "tool", "tool_call_id": tool_call.id, "content": json.dumps(tasks, ensure_ascii=False)})
+
+                        elif fn_name == "delete_task":
+                            from src.db import delete_task_db
+                            try:
+                                args = json.loads(tool_call.function.arguments)
+                                success = delete_task_db(args.get("identifier", ""))
+                            except Exception as de:
+                                success = False
+                            logger.info(f"LLM triggered tool delete_task: success={success}")
+                            messages.append({"role": "tool", "tool_call_id": tool_call.id, "content": f"Task deletion result: {success}"})
 
                     # Second call to generate final answer using tool execution results
                     final_response = self.client.chat.completions.create(

@@ -116,6 +116,29 @@ def setup_database():
                 CREATE INDEX IF NOT EXISTS idx_chat_history_user ON chat_history (user_id, id DESC);
             """)
 
+            # Create projects and tasks tables
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS projects (
+                    id SERIAL PRIMARY KEY,
+                    name VARCHAR(100) UNIQUE NOT NULL,
+                    description TEXT,
+                    status VARCHAR(20) DEFAULT 'active',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE TABLE IF NOT EXISTS tasks (
+                    id SERIAL PRIMARY KEY,
+                    project_id INT REFERENCES projects(id) ON DELETE CASCADE,
+                    title VARCHAR(255) NOT NULL,
+                    description TEXT,
+                    priority INT DEFAULT 2,
+                    status VARCHAR(20) DEFAULT 'todo',
+                    due_date DATE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    completed_at TIMESTAMP
+                );
+                CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks (status, project_id);
+            """)
+
             # Create tier3_memory_index table
             if has_pgvector:
                 cur.execute("""

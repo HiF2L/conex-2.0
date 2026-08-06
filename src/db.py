@@ -81,6 +81,29 @@ def init_db() -> bool:
                 CREATE INDEX IF NOT EXISTS idx_scheduled_pings_status ON scheduled_pings (status, scheduled_at);
             """)
 
+            # 4. Projects and Tasks tables
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS projects (
+                    id SERIAL PRIMARY KEY,
+                    name VARCHAR(100) UNIQUE NOT NULL,
+                    description TEXT,
+                    status VARCHAR(20) DEFAULT 'active',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE TABLE IF NOT EXISTS tasks (
+                    id SERIAL PRIMARY KEY,
+                    project_id INT REFERENCES projects(id) ON DELETE CASCADE,
+                    title VARCHAR(255) NOT NULL,
+                    description TEXT,
+                    priority INT DEFAULT 2,
+                    status VARCHAR(20) DEFAULT 'todo',
+                    due_date DATE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    completed_at TIMESTAMP
+                );
+                CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks (status, project_id);
+            """)
+
             # 3. Tier 3 memory index table with FTS tsvector and optional vector column
             if has_pgvector:
                 cur.execute("""
@@ -560,10 +583,262 @@ def delete_tier3_memory_by_keyword(keyword: str) -> int:
             """, (like_pattern, like_pattern, like_pattern, like_pattern))
             deleted_count = cur.rowcount
             conn.commit()
-            logger.info(f"Deleted {deleted_count} Tier 3 memory entries from PostgreSQL matching '{clean_kw}'.")
-            return deleted_count
+            db_deleted = delete_tier3_memory_by_keyword(clean_kw)
+            logger.info(f"PostgreSQL Tier 3 deletion for '{clean_kw}' removed {db_deleted} DB rows.")
+            return db_deleted
     except Exception as e:
         logger.warning(f"Failed to delete Tier 3 memory from PostgreSQL: {e}")
         return 0
     finally:
         conn.close()
+
+# In-memory fallback storage for projects and tasks
+_in_memory_projects: List[Dict[str, Any]] = []
+_in_memory_tasks: List[Dict[str, Any]] = []
+
+def create_project_db(name: str, description: str = "") -> Dict[str, Any]:
+    """Create a new project in PostgreSQL with in-memory fallback."""
+    clean_name = name.strip()
+    if not clean_name:
+        return {"error": "Project name cannot be empty"}
+
+    conn = _get_connection()
+    if conn:
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO projects (name, description, status)
+                    VALUES (%s, %s, 'active')
+                    ON CONFLICT (name) DO UPDATE SET description = EXCLUDED.description, status = 'active'
+                    RETURNING id, name, description, status, created_at;
+                """, (clean_name, description))
+                row = cur.fetchone()
+                conn.commit()
+                return {
+                    "id": row[0],
+                    "name": row[1],
+                    "description": row[2],
+                    "status": row[3],
+                    "created_at": str(row[4])
+                }
+        except Exception as e:
+            logger.warning(f"Failed to create project in PostgreSQL: {e}")
+        finally:
+            conn.close()
+
+    # In-memory fallback
+    for p in _in_memory_projects:
+        if p["name"].lower() == clean_name.lower():
+            p["description"] = description
+            p["status"] = "active"
+            return p
+
+    proj = {
+        "id": len(_in_memory_projects) + 1,
+        "name": clean_name,
+        "description": description,
+        "status": "active",
+        "created_at": datetime.datetime.now().isoformat()
+    }
+    _in_memory_projects.append(proj)
+    return proj
+
+def list_projects_db() -> List[Dict[str, Any]]:
+    """List all projects."""
+    conn = _get_connection()
+    if conn:
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT id, name, description, status, created_at FROM projects ORDER BY id ASC;
+                """)
+                rows = cur.fetchall()
+                if rows:
+                    return [
+                        {"id": r[0], "name": r[1], "description": r[2], "status": r[3], "created_at": str(r[4])}
+                        for r in rows
+                    ]
+        except Exception as e:
+            logger.warning(f"Failed to list projects from PostgreSQL: {e}")
+        finally:
+            conn.close()
+    return _in_memory_projects
+
+def create_task_db(title: str, project_name: Optional[str] = None, priority: int = 2, due_date: Optional[str] = None, description: str = "") -> Dict[str, Any]:
+    """Create a new task under an optional project."""
+    clean_title = title.strip()
+    if not clean_title:
+        return {"error": "Task title cannot be empty"}
+
+    project_id = None
+    if project_name:
+        proj = create_project_db(project_name)
+        project_id = proj.get("id")
+
+    conn = _get_connection()
+    if conn:
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO tasks (project_id, title, description, priority, status, due_date)
+                    VALUES (%s, %s, %s, %s, 'todo', %s)
+                    RETURNING id, project_id, title, description, priority, status, due_date, created_at;
+                """, (project_id, clean_title, description, priority, due_date if due_date else None))
+                row = cur.fetchone()
+                conn.commit()
+                return {
+                    "id": row[0],
+                    "project_id": row[1],
+                    "project_name": project_name,
+                    "title": row[2],
+                    "description": row[3],
+                    "priority": row[4],
+                    "status": row[5],
+                    "due_date": str(row[6]) if row[6] else None,
+                    "created_at": str(row[7])
+                }
+        except Exception as e:
+            logger.warning(f"Failed to create task in PostgreSQL: {e}")
+        finally:
+            conn.close()
+
+    # In-memory fallback
+    task = {
+        "id": len(_in_memory_tasks) + 1,
+        "project_id": project_id,
+        "project_name": project_name,
+        "title": clean_title,
+        "description": description,
+        "priority": priority,
+        "status": "todo",
+        "due_date": due_date,
+        "created_at": datetime.datetime.now().isoformat()
+    }
+    _in_memory_tasks.append(task)
+    return task
+
+def get_active_tasks_db(project_name: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Retrieve active ('todo', 'in_progress') tasks, optionally filtered by project."""
+    conn = _get_connection()
+    if conn:
+        try:
+            with conn.cursor() as cur:
+                if project_name:
+                    cur.execute("""
+                        SELECT t.id, t.title, t.description, t.priority, t.status, t.due_date, p.name
+                        FROM tasks t
+                        LEFT JOIN projects p ON t.project_id = p.id
+                        WHERE t.status IN ('todo', 'in_progress') AND LOWER(p.name) = LOWER(%s)
+                        ORDER BY t.priority ASC, t.id ASC;
+                    """, (project_name.strip(),))
+                else:
+                    cur.execute("""
+                        SELECT t.id, t.title, t.description, t.priority, t.status, t.due_date, p.name
+                        FROM tasks t
+                        LEFT JOIN projects p ON t.project_id = p.id
+                        WHERE t.status IN ('todo', 'in_progress')
+                        ORDER BY t.priority ASC, t.id ASC;
+                    """)
+                rows = cur.fetchall()
+                if rows is not None:
+                    return [
+                        {
+                            "id": r[0],
+                            "title": r[1],
+                            "description": r[2],
+                            "priority": r[3],
+                            "status": r[4],
+                            "due_date": str(r[5]) if r[5] else None,
+                            "project_name": r[6]
+                        }
+                        for r in rows
+                    ]
+        except Exception as e:
+            logger.warning(f"Failed to fetch active tasks from PostgreSQL: {e}")
+        finally:
+            conn.close()
+
+    # In-memory fallback
+    res = []
+    for t in _in_memory_tasks:
+        if t["status"] in ("todo", "in_progress"):
+            if not project_name or (t.get("project_name") and t["project_name"].lower() == project_name.lower()):
+                res.append(t)
+    return res
+
+def complete_task_db(identifier: str) -> bool:
+    """Complete a task by ID (integer) or title match."""
+    clean_id = str(identifier).strip()
+    if not clean_id:
+        return False
+
+    is_int = clean_id.isdigit()
+    task_id = int(clean_id) if is_int else None
+
+    conn = _get_connection()
+    if conn:
+        try:
+            with conn.cursor() as cur:
+                if task_id is not None:
+                    cur.execute("""
+                        UPDATE tasks SET status = 'done', completed_at = CURRENT_TIMESTAMP WHERE id = %s;
+                    """, (task_id,))
+                else:
+                    pattern = f"%{clean_id}%"
+                    cur.execute("""
+                        UPDATE tasks SET status = 'done', completed_at = CURRENT_TIMESTAMP WHERE title ILIKE %s;
+                    """, (pattern,))
+                updated = cur.rowcount > 0
+                conn.commit()
+                if updated:
+                    return True
+        except Exception as e:
+            logger.warning(f"Failed to complete task in PostgreSQL: {e}")
+        finally:
+            conn.close()
+
+    # In-memory fallback
+    for t in _in_memory_tasks:
+        if (task_id is not None and t["id"] == task_id) or (clean_id.lower() in t["title"].lower()):
+            t["status"] = "done"
+            t["completed_at"] = datetime.datetime.now().isoformat()
+            return True
+    return False
+
+def delete_task_db(identifier: str) -> bool:
+    """Delete a task by ID or title match."""
+    clean_id = str(identifier).strip()
+    if not clean_id:
+        return False
+
+    is_int = clean_id.isdigit()
+    task_id = int(clean_id) if is_int else None
+
+    conn = _get_connection()
+    if conn:
+        try:
+            with conn.cursor() as cur:
+                if task_id is not None:
+                    cur.execute("""
+                        DELETE FROM tasks WHERE id = %s;
+                    """, (task_id,))
+                else:
+                    pattern = f"%{clean_id}%"
+                    cur.execute("""
+                        DELETE FROM tasks WHERE title ILIKE %s;
+                    """, (pattern,))
+                deleted = cur.rowcount > 0
+                conn.commit()
+                if deleted:
+                    return True
+        except Exception as e:
+            logger.warning(f"Failed to delete task in PostgreSQL: {e}")
+        finally:
+            conn.close()
+
+    # In-memory fallback
+    for t in list(_in_memory_tasks):
+        if (task_id is not None and t["id"] == task_id) or (clean_id.lower() in t["title"].lower()):
+            _in_memory_tasks.remove(t)
+            return True
+    return False

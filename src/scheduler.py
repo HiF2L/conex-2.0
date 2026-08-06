@@ -49,14 +49,25 @@ async def send_evening_reflection(bot: Bot, target_user_id: int, memory_engine: 
     if not target_user_id:
         return
     
-    # 1. Assemble current active sprint state from Tier 2
+    # 1. Fetch active tasks directly from PostgreSQL / Task Engine
+    from src.db import get_active_tasks_db
+    active_tasks = get_active_tasks_db()
+    if active_tasks:
+        task_items = [f"- [{t.get('project_name') or 'Общий'}] (ID: {t['id']}) {t['title']}" for t in active_tasks]
+        tasks_block = "АКТИВНЫЕ ЗАДАЧИ ИЗ БАЗЫ ДАННЫХ:\n" + "\n".join(task_items)
+    else:
+        tasks_block = "АКТИВНЫЕ ЗАДАЧИ ИЗ БАЗЫ ДАННЫХ: Нет невыполненных задач."
+
+    # 2. Assemble current active sprint state from Tier 2
     prompt, trace = memory_engine.assemble_prompt("Evening Sync task review and atomic planning for tomorrow.")
-    
+    prompt = f"{prompt}\n\n{tasks_block}"
+
     sync_query = (
         "Сформируй ЕДИНОЕ вечернее сообщение 21:00 Evening Sync строго на русском языке:\n"
-        "1. Проверь и задай вопросы по 4 ежедневным правилам системности (Проектный шаг, Уборка 4 зон, 1ч Прогулка/Мысли, Вакансия/Отклик), опираясь на текущее состояние памяти Tier 2.\n"
-        "2. Спроси пользователя, что из запланированного сегодня получилось, а что заблокировало и почему.\n"
-        "3. Попроси выбрать 1 атомарный микро-шаг (15–30 мин) на завтра для плавного входа в рабочий день."
+        "1. Проверь и задай вопросы по 4 ежедневным правилам системности (Проектный шаг, Уборка 4 зон, 1ч Прогулка/Мысли, Вакансия/Отклик).\n"
+        "2. Выведи полученный список невыполненных задач из базы данных.\n"
+        "3. Спроси пользователя, что из этого получилось закрыть сегодня, а что заблокировало и почему.\n"
+        "4. Попроси выбрать 1 атомарный микро-шаг (15–30 мин) на завтра для плавного входа в рабочий день."
     )
     
     try:
@@ -65,9 +76,10 @@ async def send_evening_reflection(bot: Bot, target_user_id: int, memory_engine: 
         logger.warning(f"LLM call for Evening Sync failed: {e}. Using fallback format.")
         response = (
             "Подведем итоги сегодняшнего дня!\n\n"
-            "1. **Проверка 4 правил системности** (Проектный шаг, Уборка 4 зон, 1ч Прогулка/Мысли, Отклик/Работа) — что удалось закрыть?\n"
-            "2. Что сегодня получилось идеально, а что заблокировало?\n"
-            "3. Выбери **1 атомарный микро-шаг (15–30 мин)** на завтра!"
+            f"1. **Проверка 4 правил системности** (Проектный шаг, Уборка 4 зон, 1ч Прогулка/Мысли, Отклик/Работа) — что удалось закрыть?\n"
+            f"2. **Текущие задачи**:\n{tasks_block}\n\n"
+            "3. Что сегодня получилось идеально, а что заблокировало?\n"
+            "4. Выбери **1 атомарный микро-шаг (15–30 мин)** на завтра!"
         )
     
     full_message = (
