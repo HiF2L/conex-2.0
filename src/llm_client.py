@@ -359,11 +359,11 @@ class LLMClient:
         t2_updates = []
         t3_updates = {}
 
-        # 1. State / Energy in Tier 2
-        if "energy" in lower_text or "dump" in lower_text or "voice" in lower_text or "sprint" in lower_text:
+        # 1. State / Energy / Daily Systems in Tier 2
+        if any(k in lower_text for k in ["energy", "dump", "voice", "sprint", "систем", "правил", "рутин", "каждый день"]):
             t2_updates.append(QAPair(
                 id=f"state_energy_{int(datetime.datetime.now().timestamp())}",
-                question="What is the user's latest reported energy state or dump focus?",
+                question="What are the user's latest reported energy state, active daily system rules, or sprint focus?",
                 answer=f"User mentioned context: '{text[:120]}'",
                 weight=1.0,
                 confidence=0.9,
