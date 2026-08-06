@@ -87,9 +87,9 @@ class ProactiveEngine:
             event_type = ping.get("event_type", "event_followup")
 
             prompt = (
-                f"You are the user's empathetic Senior Friend & Coach. "
-                f"Generate a short, friendly 1-2 sentence Telegram check-in message asking how their event went: '{context_text}'. "
-                "Keep it warm, natural, direct, and encouraging without fluff."
+                f"Ты — дружелюбный и внимательный Senior Friend & Coach пользователя. "
+                f"Сформируй короткое (1–2 предложения) сообщение на русском языке в Telegram, поинтересовавшись, как прошло мероприятие: '{context_text}'. "
+                "Пиши тепло, естественным языком, прямо и без воды. Отвечай строго на русском языке."
             )
             
             try:

@@ -33,8 +33,11 @@ async def send_morning_briefing(bot: Bot, target_user_id: int, memory_engine: Me
     memory_engine.apply_decay()
     
     # 2. Assemble morning context
-    prompt, trace = memory_engine.assemble_prompt("Morning briefing and today's sprint focus plan.")
-    briefing_query = "Generate a concise, high-impact 3-bullet Morning Briefing for today focusing on my active sprint goals."
+    prompt, trace = memory_engine.assemble_prompt("Утренний брифинг и план задач спринта на сегодня.")
+    briefing_query = (
+        "Сформируй лаконичный, мощный утренний брифинг (Morning Briefing) на сегодня на русском языке.\n"
+        "Включи 3 ключевых пункта фокуса, опираясь на активные спринт-цели из памяти Tier 2. Отвечай строго на русском языке без лишних фраз."
+    )
     response = llm_client.generate_coaching_response(prompt, briefing_query)
     
     full_message = f"🌅 **Morning Briefing (09:00)**\n\n{response}\n\n_🧠 [Memory Trace: T1: {trace.t1_count} Qs | T2: {trace.t2_count} Qs | T3: {trace.t3_total} Qs | ~{trace.estimated_tokens} tokens]_"
@@ -50,10 +53,10 @@ async def send_evening_reflection(bot: Bot, target_user_id: int, memory_engine: 
     prompt, trace = memory_engine.assemble_prompt("Evening Sync task review and atomic planning for tomorrow.")
     
     sync_query = (
-        "Generate a SINGLE consolidated 21:00 Evening Sync message formatted as follows:\n"
-        "1. List all active planned sprint tasks/goals for today in a consolidated list.\n"
-        "2. Ask the user what succeeded, what was blocked, and why.\n"
-        "3. Prompt the user to select 1 atomic micro-step (15–30 mins) for tomorrow to guarantee momentum."
+        "Сформируй ЕДИНОЕ вечернее сообщение 21:00 Evening Sync строго на русском языке:\n"
+        "1. Проверь и задай вопросы по 4 ежедневным правилам системности (Проектный шаг, Уборка 4 зон, 1ч Прогулка/Мысли, Вакансия/Отклик), опираясь на текущее состояние памяти Tier 2.\n"
+        "2. Спроси пользователя, что из запланированного сегодня получилось, а что заблокировало и почему.\n"
+        "3. Попроси выбрать 1 атомарный микро-шаг (15–30 мин) на завтра для плавного входа в рабочий день."
     )
     
     try:
@@ -61,10 +64,10 @@ async def send_evening_reflection(bot: Bot, target_user_id: int, memory_engine: 
     except Exception as e:
         logger.warning(f"LLM call for Evening Sync failed: {e}. Using fallback format.")
         response = (
-            "Let's review your sprint progress for today!\n\n"
-            "1. What tasks succeeded today?\n"
-            "2. Were there any blockers or energy drains?\n"
-            "3. Select **1 atomic micro-step (15–30 mins)** to execute first thing tomorrow morning!"
+            "Подведем итоги сегодняшнего дня!\n\n"
+            "1. **Проверка 4 правил системности** (Проектный шаг, Уборка 4 зон, 1ч Прогулка/Мысли, Отклик/Работа) — что удалось закрыть?\n"
+            "2. Что сегодня получилось идеально, а что заблокировало?\n"
+            "3. Выбери **1 атомарный микро-шаг (15–30 мин)** на завтра!"
         )
     
     full_message = (
@@ -97,10 +100,10 @@ async def run_nightly_snapshot_and_cleanup(bot: Bot, target_user_id: int, memory
 
 def create_scheduler(bot: Bot, target_user_id: int, memory_engine: MemoryEngine, llm_client: LLMClient) -> AsyncIOScheduler:
     """
-    Initialize and return APScheduler instance configured for daily 09:00, Evening Sync (EVENING_SYNC_TIME), 23:59, and 15-min proactive triggers.
+    Initialize and return APScheduler instance with Europe/Moscow timezone for daily 09:00, Evening Sync, 23:59, and 15-min proactive triggers.
     """
     import os
-    scheduler = AsyncIOScheduler()
+    scheduler = AsyncIOScheduler(timezone="Europe/Moscow")
 
     evening_sync_str = os.getenv("EVENING_SYNC_TIME", "21:00").strip()
     try:

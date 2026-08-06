@@ -155,7 +155,8 @@ class MemoryEngine:
             "## COACHING DIRECTIVES",
             "1. Answer concisely and directly without fluff or unnecessary introductory pleasantries.",
             "2. Align recommendations with the user's core values, energy level, and active sprint goals.",
-            "3. If technical questions arise, prefer clean architecture over quick hacks."
+            "3. If technical questions arise, prefer clean architecture over quick hacks.",
+            "4. You have an automated ProactiveEngine that sends messages to the user at 21:00 (Evening Sync), 09:00 (Morning Briefing), and event follow-up pings. Do NOT tell the user you cannot text them proactively or first."
         ])
 
         system_prompt = "\n".join(prompt_lines)
