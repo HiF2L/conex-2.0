@@ -435,6 +435,37 @@ def search_tier3_memory(query: str, top_k: int = 4) -> str:
                     """, (clean_query, clean_query, clean_query, clean_query, like_pattern, like_pattern, like_pattern, top_k))
                 
                 rows = cur.fetchall()
+                if not rows:
+                    # Token-based multi-field ILIKE fallback for broad or multi-word queries
+                    tokens = [t for t in re.findall(r"\w+", clean_query) if len(t) > 2]
+                    if tokens:
+                        token_clauses = []
+                        params_tok = []
+                        for t in tokens[:4]:
+                            token_clauses.append("(question ILIKE %s OR answer ILIKE %s OR entity_name ILIKE %s)")
+                            pat = f"%{t}%"
+                            params_tok.extend([pat, pat, pat])
+                        tok_sql = " OR ".join(token_clauses)
+                        params_tok.append(top_k)
+                        cur.execute(f"""
+                            SELECT entity_name, question, answer, weight, valid_from
+                            FROM tier3_memory_index
+                            WHERE {tok_sql}
+                            ORDER BY weight DESC
+                            LIMIT %s;
+                        """, tuple(params_tok))
+                        rows = cur.fetchall()
+
+                if not rows:
+                    # Generic top-K highest-weighted fallback so queries always return memory context
+                    cur.execute("""
+                        SELECT entity_name, question, answer, weight, valid_from
+                        FROM tier3_memory_index
+                        ORDER BY weight DESC
+                        LIMIT %s;
+                    """, (top_k,))
+                    rows = cur.fetchall()
+
                 for r in rows:
                     results.append({
                         "entity": r[0],

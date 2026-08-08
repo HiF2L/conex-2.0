@@ -351,13 +351,15 @@ class LLMClient:
         return self._sanitize_tool_leak(self._generate_offline_coaching_response(system_prompt, user_input))
 
     def _sanitize_tool_leak(self, text: str) -> str:
-        """Removes leaked raw tool call syntax (e.g. to=func_name ..., to=functions.xyz) from text responses."""
+        """Removes leaked raw tool call syntax (e.g. to=func_name ..., to=functions.xyz, {"query": ...}) from text responses."""
         if not text:
             return ""
         # Strip patterns like `to=function_name ...` or `to=functions.xyz ...`
         cleaned = re.sub(r"to=\w+(\.\w+)?\s*(\(json\))?:?\s*\{.*?\}", "", text, flags=re.DOTALL)
         cleaned = re.sub(r"to=\w+(\.\w+)?\s+[^\n]+", "", cleaned)
         cleaned = re.sub(r"to=functions\.\w+[^\n]*", "", cleaned)
+        # Strip standalone raw JSON tool call leaks (e.g. {"query": "..."})
+        cleaned = re.sub(r'^\s*\{\s*"(query|target_tier|keyword|identifier|title|project_name)"\s*:.*?\n?', "", cleaned, flags=re.MULTILINE)
         return cleaned.strip()
 
     def extract_memory_diff(
