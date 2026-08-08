@@ -23,15 +23,16 @@ class ExtractorService:
         user_message: str, 
         agent_response: str, 
         system_prompt: str,
-        on_complete_callback: Optional[Callable[[MemoryDiff], None]] = None
+        on_complete_callback: Optional[Callable[[MemoryDiff], None]] = None,
+        conversation_history: Optional[list] = None
     ):
         """
         Launch non-blocking background worker task to extract memory diff and update YAML files.
         """
         turn_text = f"USER INPUT:\n{user_message}\n\nAGENT RESPONSE:\n{agent_response}"
-        self.executor.submit(self._run_extraction_pipeline, turn_text, system_prompt, on_complete_callback)
+        self.executor.submit(self._run_extraction_pipeline, turn_text, system_prompt, on_complete_callback, 0, conversation_history)
 
-    def extract_sync(self, raw_text: str, system_prompt: str, user_id: int = 0) -> MemoryDiff:
+    def extract_sync(self, raw_text: str, system_prompt: str, user_id: int = 0, conversation_history: Optional[list] = None) -> MemoryDiff:
         """
         Synchronous extraction pipeline used for /dump stream of consciousness processing.
         """
@@ -40,7 +41,9 @@ class ExtractorService:
         from src.db import sync_tier3_to_postgres, save_scheduled_ping
         current_date = datetime.date.today().isoformat()
         target_uid = user_id or int(os.getenv("ALLOWED_TELEGRAM_ID", "0") or "0")
-        diff = self.llm_client.extract_memory_diff(system_prompt, raw_text, current_date=current_date)
+        diff = self.llm_client.extract_memory_diff(
+            system_prompt, raw_text, current_date=current_date, conversation_history=conversation_history
+        )
         if diff:
             self.memory_engine.apply_diff(diff, current_date=current_date)
             sync_tier3_to_postgres()
@@ -55,7 +58,8 @@ class ExtractorService:
         text_to_analyze: str, 
         system_prompt: str,
         on_complete_callback: Optional[Callable[[MemoryDiff], None]] = None,
-        user_id: int = 0
+        user_id: int = 0,
+        conversation_history: Optional[list] = None
     ):
         """
         Worker logic executed in background thread.
@@ -66,7 +70,9 @@ class ExtractorService:
         current_date = datetime.date.today().isoformat()
         target_uid = user_id or int(os.getenv("ALLOWED_TELEGRAM_ID", "0") or "0")
         try:
-            diff = self.llm_client.extract_memory_diff(system_prompt, text_to_analyze, current_date=current_date)
+            diff = self.llm_client.extract_memory_diff(
+                system_prompt, text_to_analyze, current_date=current_date, conversation_history=conversation_history
+            )
             if diff and (diff.tier1_updates or diff.tier2_updates or diff.tier3_updates or diff.deletions or diff.scheduled_pings):
                 self.memory_engine.apply_diff(diff, current_date=current_date)
                 sync_tier3_to_postgres()

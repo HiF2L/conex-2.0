@@ -1,0 +1,26 @@
+=== VITALIK USER PROFILE & CORE IDENTITY ===
+Name: Vitalik (Hitori)
+Core Identity: Pragmatic, systems-driven software architect with a vision for personal AI agents, transhumanism, and life optimization.
+Values: High speed of execution, clean software architecture, conciseness, personal freedom, health, and authentic human connection.
+
+=== PROJECT 1: LifeOS ===
+Description: Personal AI memory and coaching agent powered by a 3-tier question-anchored memory architecture (Tier 1: Core Values & Identity, Tier 2: Active State & Rules, Tier 3: Entity Index).
+Tech Stack: Python, PostgreSQL (pgvector + FTS tsvector), AsyncIOScheduler, OpenAI Function Calling, Telegram bot (aiogram 3).
+Status: Active primary focus. Building production-ready MVP.
+
+=== PROJECT 2: WeGeny ===
+Description: Commercial AI & backend service platform.
+Tech Stack: Python, FastAPI, PostgreSQL, API Gateway.
+Status: Commercial asset with deployed API Gateway. Treated as a separate commercial project, NOT part of LifeOS.
+
+=== PROJECT 3: Intelligence Bit ===
+Description: Autonomous daily tech news summary channel and media project.
+Status: Active media/experimental project. Operated as a distinct media entity, NOT part of WeGeny or LifeOS.
+
+=== HEALTH & DAILY SYSTEMS ===
+Daily Rules:
+1. Project Step: Complete at least 1 concrete technical action daily.
+2. Cleaning: Clean 4 designated zones in the apartment.
+3. Walk & Think: Spend 1 hour outdoors walking and thinking without distraction.
+4. Career Action: Submit at least 1 job application or follow-up daily.
+Medical Routine: Attending day hospital (Дневной стационар) for regular recovery and therapy.

@@ -314,19 +314,32 @@ class LLMClient:
         # Offline / Fallback Response
         return self._generate_offline_coaching_response(system_prompt, user_input)
 
-    def extract_memory_diff(self, system_prompt: str, text_to_analyze: str, current_date: Optional[str] = None) -> MemoryDiff:
+    def extract_memory_diff(
+        self, 
+        system_prompt: str, 
+        text_to_analyze: str, 
+        current_date: Optional[str] = None,
+        conversation_history: Optional[List[Dict[str, str]]] = None
+    ) -> MemoryDiff:
         """
         Extract memory updates as a structured MemoryDiff using FAST_MODEL.
-        Injects CURRENT_DATE and enforces dynamic Tier 3 entity categorization.
-        Robustly handles API provider constraints (e.g. provod.ai 400 errors).
+        Injects CURRENT_DATE, CONVERSATION CONTEXT (last 3-4 turns), and enforces
+        dynamic Tier 3 entity categorization and pronoun resolution.
         """
         import datetime
         today_str = current_date or datetime.date.today().isoformat()
 
+        context_str = ""
+        if conversation_history:
+            recent_turns = conversation_history[-4:]
+            context_lines = [f"{turn.get('role', 'user').upper()}: {turn.get('content', '')}" for turn in recent_turns]
+            context_str = "\n\n=== CONVERSATION CONTEXT (LAST 4 TURNS) ===\n" + "\n".join(context_lines)
+
         if self.is_api_configured():
             extraction_prompt = (
                 f"{system_prompt}\n\n"
-                f"CURRENT_DATE: {today_str}\n\n"
+                f"CURRENT_DATE: {today_str}"
+                f"{context_str}\n\n"
                 "CRITICAL EXTRACTION RULES:\n"
                 f"1. DATE ACCURACY: All new or updated QA items MUST use valid_from = '{today_str}'. DO NOT use past years or hallucinated dates.\n"
                 "2. TIER 3 DYNAMIC ENTITIES: Identify any specific projects, topics, or domains mentioned in the text "
@@ -338,7 +351,8 @@ class LLMClient:
                 "5. DEDUPLICATION & REPLACEMENT: If new user information updates, replaces, or contradicts an existing Tier 2 item, place the ID of the old Tier 2 item in 'deletions' to prevent duplicates.\n"
                 "6. PROMOTION TO TIER 3: If a task or idea matures into a specific project feature, create an entry in 'tier3_updates[entity]' and list the old Tier 2 item ID in 'deletions'.\n"
                 "7. EVENT PING EXTRACTION: Identify any specific time-sensitive events mentioned by the user (e.g. 'Завтра в 11:00 иду к врачу', 'Meeting at 3pm'). Populate 'scheduled_pings': [{'scheduled_at': ISO_STR (2-3 hours after event), 'event_type': str, 'context_text': str}].\n"
-                "8. DAILY SYSTEMS & ROUTINES: Identify any recurring daily system rules defined by the user (e.g. project step, cleaning 4 zones, 1hr walk/think, job applications). Persist them to 'tier2_updates' with question 'What are the user's active daily system rules/routines?' and weight 1.0.\n\n"
+                "8. DAILY SYSTEMS & ROUTINES: Identify any recurring daily system rules defined by the user (e.g. project step, cleaning 4 zones, 1hr walk/think, job applications). Persist them to 'tier2_updates' with question 'What are the user's active daily system rules/routines?' and weight 1.0.\n"
+                "9. PRONOUN RESOLUTION & CONTEXT BINDING: Use the preceding conversation turns to accurately resolve pronouns ('he', 'it', 'this project') and bind facts strictly to the correct entity name. Never link Entity A to Entity B unless explicitly declared in text.\n\n"
                 "Return a strict JSON object matching MemoryDiff schema:\n"
                 "{\n"
                 '  "tier1_updates": [{"id": str, "question": str, "answer": str, "weight": float, "confidence": float, "origin": str, "valid_from": str, "valid_until": str|null}],\n'
