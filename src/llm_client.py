@@ -17,28 +17,6 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-def is_meta_analysis_query(user_message: str) -> bool:
-    """
-    Detects domain-agnostic meta-analysis queries (personality analysis, global project overview, life review).
-    """
-    if not user_message:
-        return False
-
-    msg = user_message.lower().strip()
-    
-    meta_keywords = [
-        # Russian patterns
-        "опиши меня", "проанализируй", "кто я", "опиши мои", "расскажи о моих",
-        "мои проекты", "о моих проектах", "список проектов", "моя личность", "портрет личности", "обзор жизни",
-        "моя стратегия", "мои главные цели", "глобальный обзор", "как человека",
-        # English patterns
-        "describe me", "analyze my", "who am i", "overview my", "tell me about my",
-        "my projects", "list my projects", "my personality", "personality portrait", "global review",
-        "life review", "my main goals", "my strategy"
-    ]
-
-    return any(k in msg for k in meta_keywords)
-
 class LLMClient:
     def __init__(self):
         # Main Provider Configuration (provod.ai)
@@ -224,15 +202,8 @@ class LLMClient:
 
         if self.is_api_configured():
             try:
-                # Meta-query pre-fetch check: automatically retrieve deep long-term memory for holistic queries
-                effective_system_prompt = system_prompt
-                if is_meta_analysis_query(user_input):
-                    logger.info("Meta-analysis query detected. Pre-fetching deep Tier 3 memory context...")
-                    meta_search_results = search_tier3_memory("identity core values projects overview strategy")
-                    effective_system_prompt = f"{system_prompt}\n\n=== DEEP MEMORY RELEVANT ENTITIES (META-ANALYSIS PRE-FETCH) ===\n{meta_search_results}"
-
                 # Construct messages payload: system prompt + sliding chat history + current user message
-                messages = [{"role": "system", "content": effective_system_prompt}]
+                messages = [{"role": "system", "content": system_prompt}]
                 if chat_history:
                     for turn in chat_history:
                         if isinstance(turn, dict) and "role" in turn and "content" in turn:
