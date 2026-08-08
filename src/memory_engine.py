@@ -156,7 +156,9 @@ class MemoryEngine:
             "1. Answer concisely and directly without fluff or unnecessary introductory pleasantries.",
             "2. Align recommendations with the user's core values, energy level, and active sprint goals.",
             "3. If technical questions arise, prefer clean architecture over quick hacks.",
-            "4. You have an automated ProactiveEngine that sends messages to the user at 21:00 (Evening Sync), 09:00 (Morning Briefing), and event follow-up pings. Do NOT tell the user you cannot text them proactively or first."
+            "4. You have an automated ProactiveEngine that sends messages to the user at 21:00 (Evening Sync), 09:00 (Morning Briefing), and event follow-up pings. Do NOT tell the user you cannot text them proactively or first.",
+            "5. ENTITY BOUNDARY ISOLATION: Treat every named entity (projects, products, tools, subjects) as a strictly isolated namespace. NEVER assume relationships, shared architecture, or codebases between two entities unless explicitly confirmed in memory.",
+            "6. UNCERTAINTY-DRIVEN SEARCH GATE: When the user queries any named entity or specific proper noun, evaluate if current context contains the FULL definition. If context is missing or partial, calling search_memory(query) is MANDATORY before replying. Never state an entity is unknown without searching Tier 3 first."
         ])
 
         system_prompt = "\n".join(prompt_lines)

@@ -717,8 +717,16 @@ def create_task_db(title: str, project_name: Optional[str] = None, priority: int
     _in_memory_tasks.append(task)
     return task
 
-def get_active_tasks_db(project_name: Optional[str] = None) -> List[Dict[str, Any]]:
-    """Retrieve active ('todo', 'in_progress') tasks, optionally filtered by project."""
+def get_active_tasks_db(project_name: Optional[str] = None, status: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Retrieve tasks optionally filtered by project_name and status ('todo', 'in_progress', 'done', 'all')."""
+    clean_status = (status or "").lower().strip()
+    if clean_status == "all":
+        status_filter = ("todo", "in_progress", "done", "cancelled")
+    elif clean_status:
+        status_filter = (clean_status,)
+    else:
+        status_filter = ("todo", "in_progress")
+
     conn = _get_connection()
     if conn:
         try:
@@ -728,17 +736,17 @@ def get_active_tasks_db(project_name: Optional[str] = None) -> List[Dict[str, An
                         SELECT t.id, t.title, t.description, t.priority, t.status, t.due_date, p.name
                         FROM tasks t
                         LEFT JOIN projects p ON t.project_id = p.id
-                        WHERE t.status IN ('todo', 'in_progress') AND LOWER(p.name) = LOWER(%s)
+                        WHERE t.status = ANY(%s) AND LOWER(p.name) = LOWER(%s)
                         ORDER BY t.priority ASC, t.id ASC;
-                    """, (project_name.strip(),))
+                    """, (list(status_filter), project_name.strip()))
                 else:
                     cur.execute("""
                         SELECT t.id, t.title, t.description, t.priority, t.status, t.due_date, p.name
                         FROM tasks t
                         LEFT JOIN projects p ON t.project_id = p.id
-                        WHERE t.status IN ('todo', 'in_progress')
+                        WHERE t.status = ANY(%s)
                         ORDER BY t.priority ASC, t.id ASC;
-                    """)
+                    """, (list(status_filter),))
                 rows = cur.fetchall()
                 if rows is not None:
                     return [
@@ -761,7 +769,7 @@ def get_active_tasks_db(project_name: Optional[str] = None) -> List[Dict[str, An
     # In-memory fallback
     res = []
     for t in _in_memory_tasks:
-        if t["status"] in ("todo", "in_progress"):
+        if t["status"] in status_filter:
             if not project_name or (t.get("project_name") and t["project_name"].lower() == project_name.lower()):
                 res.append(t)
     return res

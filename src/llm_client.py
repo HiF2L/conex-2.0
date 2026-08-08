@@ -152,11 +152,12 @@ class LLMClient:
             "type": "function",
             "function": {
                 "name": "list_tasks",
-                "description": "List active pending tasks from PostgreSQL Task Manager.",
+                "description": "List tasks from PostgreSQL Task Manager.",
                 "parameters": {
                     "type": "object",
                     "properties": {
-                        "project_name": {"type": "string", "description": "Optional project name filter"}
+                        "project_name": {"type": "string", "description": "Optional project name filter"},
+                        "status": {"type": "string", "description": "Optional status filter ('todo', 'in_progress', 'done', 'all')"}
                     }
                 }
             }
@@ -279,10 +280,10 @@ class LLMClient:
                             from src.db import get_active_tasks_db
                             try:
                                 args = json.loads(tool_call.function.arguments)
-                                tasks = get_active_tasks_db(args.get("project_name"))
+                                tasks = get_active_tasks_db(args.get("project_name"), args.get("status"))
                             except Exception as le:
                                 tasks = []
-                            logger.info(f"LLM triggered tool list_tasks: found {len(tasks)} active tasks")
+                            logger.info(f"LLM triggered tool list_tasks: found {len(tasks)} tasks")
                             messages.append({"role": "tool", "tool_call_id": tool_call.id, "content": json.dumps(tasks, ensure_ascii=False)})
 
                         elif fn_name == "delete_task":
