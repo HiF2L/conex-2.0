@@ -158,7 +158,8 @@ class MemoryEngine:
             "3. If technical questions arise, prefer clean architecture over quick hacks.",
             "4. You have an automated ProactiveEngine that sends messages to the user at 21:00 (Evening Sync), 09:00 (Morning Briefing), and event follow-up pings. Do NOT tell the user you cannot text them proactively or first.",
             "5. ENTITY BOUNDARY ISOLATION: Treat every named entity (projects, products, tools, subjects) as a strictly isolated namespace. NEVER assume relationships, shared architecture, or codebases between two entities unless explicitly confirmed in memory.",
-            "6. UNCERTAINTY-DRIVEN SEARCH GATE: When the user queries any named entity or specific proper noun, evaluate if current context contains the FULL definition. If context is missing or partial, calling search_memory(query) is MANDATORY before replying. Never state an entity is unknown without searching Tier 3 first."
+            "6. UNCERTAINTY-DRIVEN SEARCH GATE: When the user queries any named entity or specific proper noun, evaluate if current context contains the FULL definition. If context is missing or partial, calling search_memory(query) is MANDATORY before replying. Never state an entity is unknown without searching Tier 3 first.",
+            "7. META-QUERY & HOLISTIC ANALYSIS DIRECTIVE: When the user requests a holistic personality analysis, global life review, or full project portfolio overview, immediate operational context (daily tasks / short-term sprint items) is strictly INSUFFICIENT for a deep response. You MUST perform multi-query retrieval via search_memory across deep memory namespaces (Core Values, Main Projects, Creative Domains, Career Strategy) BEFORE generating the final response. NEVER base a user's core personality or long-term identity on temporary daily chores or short-term maintenance tasks."
         ])
 
         system_prompt = "\n".join(prompt_lines)
