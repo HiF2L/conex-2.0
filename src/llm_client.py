@@ -3,6 +3,7 @@ LLM Client Wrapper utilizing standard OpenAI client with dotenv configuration,
 Whisper audio transcription, and intelligent fallback support.
 """
 import os
+import re
 import json
 import logging
 from typing import Dict, Any, Optional, List
@@ -178,7 +179,26 @@ class LLMClient:
             }
         }
 
-        tools = [search_tool, forget_tool, create_project_tool, create_task_tool, complete_task_tool, list_tasks_tool, delete_task_tool]
+        update_task_tool = {
+            "type": "function",
+            "function": {
+                "name": "update_task",
+                "description": "Update details (title, status, priority, due_date) of an existing task in PostgreSQL Task Manager by task ID or title match.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "identifier": {"type": "string", "description": "Task ID integer (e.g. '5') or title substring"},
+                        "title": {"type": "string", "description": "Optional new task title"},
+                        "status": {"type": "string", "description": "Optional new status ('todo', 'in_progress', 'done', 'cancelled')"},
+                        "priority": {"type": "integer", "description": "Optional new priority (1: High, 2: Medium, 3: Low)"},
+                        "due_date": {"type": "string", "description": "Optional new due date (YYYY-MM-DD)"}
+                    },
+                    "required": ["identifier"]
+                }
+            }
+        }
+
+        tools = [search_tool, forget_tool, create_project_tool, create_task_tool, complete_task_tool, list_tasks_tool, delete_task_tool, update_task_tool]
 
         if self.is_api_configured():
             try:
@@ -296,6 +316,22 @@ class LLMClient:
                             logger.info(f"LLM triggered tool delete_task: success={success}")
                             messages.append({"role": "tool", "tool_call_id": tool_call.id, "content": f"Task deletion result: {success}"})
 
+                        elif fn_name == "update_task":
+                            from src.db import update_task_db
+                            try:
+                                args = json.loads(tool_call.function.arguments)
+                                success = update_task_db(
+                                    identifier=args.get("identifier", ""),
+                                    title=args.get("title"),
+                                    status=args.get("status"),
+                                    priority=args.get("priority"),
+                                    due_date=args.get("due_date")
+                                )
+                            except Exception as ue:
+                                success = False
+                            logger.info(f"LLM triggered tool update_task: success={success}")
+                            messages.append({"role": "tool", "tool_call_id": tool_call.id, "content": f"Task update result: {success}"})
+
                     # Second call to generate final answer using tool execution results
                     final_response = self.client.chat.completions.create(
                         model=self.default_model,
@@ -303,16 +339,26 @@ class LLMClient:
                         temperature=0.7
                     )
                     if final_response.choices and final_response.choices[0].message.content:
-                        return final_response.choices[0].message.content.strip()
+                        return self._sanitize_tool_leak(final_response.choices[0].message.content.strip())
 
                 elif choice.message.content:
-                    return choice.message.content.strip()
+                    return self._sanitize_tool_leak(choice.message.content.strip())
 
             except Exception as e:
                 logger.warning(f"API call failed: {e}. Falling back to offline simulator.")
 
         # Offline / Fallback Response
-        return self._generate_offline_coaching_response(system_prompt, user_input)
+        return self._sanitize_tool_leak(self._generate_offline_coaching_response(system_prompt, user_input))
+
+    def _sanitize_tool_leak(self, text: str) -> str:
+        """Removes leaked raw tool call syntax (e.g. to=func_name ..., to=functions.xyz) from text responses."""
+        if not text:
+            return ""
+        # Strip patterns like `to=function_name ...` or `to=functions.xyz ...`
+        cleaned = re.sub(r"to=\w+(\.\w+)?\s*(\(json\))?:?\s*\{.*?\}", "", text, flags=re.DOTALL)
+        cleaned = re.sub(r"to=\w+(\.\w+)?\s+[^\n]+", "", cleaned)
+        cleaned = re.sub(r"to=functions\.\w+[^\n]*", "", cleaned)
+        return cleaned.strip()
 
     def extract_memory_diff(
         self, 

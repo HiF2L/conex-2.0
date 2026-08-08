@@ -5,6 +5,7 @@ and sliding window conversation history.
 Supports automatic local YAML fallback if PostgreSQL connection is unavailable.
 """
 import os
+import re
 import yaml
 import json
 import logging
@@ -717,8 +718,13 @@ def create_task_db(title: str, project_name: Optional[str] = None, priority: int
     _in_memory_tasks.append(task)
     return task
 
-def get_active_tasks_db(project_name: Optional[str] = None, status: Optional[str] = None) -> List[Dict[str, Any]]:
-    """Retrieve tasks optionally filtered by project_name and status ('todo', 'in_progress', 'done', 'all')."""
+def get_active_tasks_db(
+    project_name: Optional[str] = None, 
+    status: Optional[str] = None,
+    today_only: bool = False,
+    limit: Optional[int] = None
+) -> List[Dict[str, Any]]:
+    """Retrieve tasks optionally filtered by project_name, status, today_only, and limit."""
     clean_status = (status or "").lower().strip()
     if clean_status == "all":
         status_filter = ("todo", "in_progress", "done", "cancelled")
@@ -731,22 +737,26 @@ def get_active_tasks_db(project_name: Optional[str] = None, status: Optional[str
     if conn:
         try:
             with conn.cursor() as cur:
+                where_clauses = ["t.status = ANY(%s)"]
+                params: List[Any] = [list(status_filter)]
+
                 if project_name:
-                    cur.execute("""
-                        SELECT t.id, t.title, t.description, t.priority, t.status, t.due_date, p.name
-                        FROM tasks t
-                        LEFT JOIN projects p ON t.project_id = p.id
-                        WHERE t.status = ANY(%s) AND LOWER(p.name) = LOWER(%s)
-                        ORDER BY t.priority ASC, t.id ASC;
-                    """, (list(status_filter), project_name.strip()))
-                else:
-                    cur.execute("""
-                        SELECT t.id, t.title, t.description, t.priority, t.status, t.due_date, p.name
-                        FROM tasks t
-                        LEFT JOIN projects p ON t.project_id = p.id
-                        WHERE t.status = ANY(%s)
-                        ORDER BY t.priority ASC, t.id ASC;
-                    """, (list(status_filter),))
+                    where_clauses.append("LOWER(p.name) = LOWER(%s)")
+                    params.append(project_name.strip())
+
+                if today_only:
+                    where_clauses.append("(t.created_at::date = CURRENT_DATE OR t.due_date = CURRENT_DATE)")
+
+                where_sql = " AND ".join(where_clauses)
+                limit_sql = f" LIMIT {int(limit)}" if limit else ""
+
+                cur.execute(f"""
+                    SELECT t.id, t.title, t.description, t.priority, t.status, t.due_date, p.name
+                    FROM tasks t
+                    LEFT JOIN projects p ON t.project_id = p.id
+                    WHERE {where_sql}
+                    ORDER BY t.priority ASC, t.id ASC{limit_sql};
+                """, tuple(params))
                 rows = cur.fetchall()
                 if rows is not None:
                     return [
@@ -767,12 +777,18 @@ def get_active_tasks_db(project_name: Optional[str] = None, status: Optional[str
             conn.close()
 
     # In-memory fallback
+    today_str = datetime.date.today().isoformat()
     res = []
     for t in _in_memory_tasks:
         if t["status"] in status_filter:
             if not project_name or (t.get("project_name") and t["project_name"].lower() == project_name.lower()):
+                if today_only:
+                    is_created_today = t.get("created_at", "").startswith(today_str)
+                    is_due_today = t.get("due_date") == today_str
+                    if not (is_created_today or is_due_today):
+                        continue
                 res.append(t)
-    return res
+    return res[:limit] if limit else res
 
 def complete_task_db(identifier: str) -> bool:
     """Complete a task by ID (integer) or title match."""
@@ -780,8 +796,8 @@ def complete_task_db(identifier: str) -> bool:
     if not clean_id:
         return False
 
-    is_int = clean_id.isdigit()
-    task_id = int(clean_id) if is_int else None
+    match = re.search(r"\b(\d+)\b", clean_id)
+    task_id = int(match.group(1)) if match else None
 
     conn = _get_connection()
     if conn:
@@ -807,7 +823,7 @@ def complete_task_db(identifier: str) -> bool:
 
     # In-memory fallback
     for t in _in_memory_tasks:
-        if (task_id is not None and t["id"] == task_id) or (clean_id.lower() in t["title"].lower()):
+        if (task_id is not None and t["id"] == task_id) or (task_id is None and clean_id.lower() in t["title"].lower()):
             t["status"] = "done"
             t["completed_at"] = datetime.datetime.now().isoformat()
             return True
@@ -819,8 +835,8 @@ def delete_task_db(identifier: str) -> bool:
     if not clean_id:
         return False
 
-    is_int = clean_id.isdigit()
-    task_id = int(clean_id) if is_int else None
+    match = re.search(r"\b(\d+)\b", clean_id)
+    task_id = int(match.group(1)) if match else None
 
     conn = _get_connection()
     if conn:
@@ -846,7 +862,80 @@ def delete_task_db(identifier: str) -> bool:
 
     # In-memory fallback
     for t in list(_in_memory_tasks):
-        if (task_id is not None and t["id"] == task_id) or (clean_id.lower() in t["title"].lower()):
+        if (task_id is not None and t["id"] == task_id) or (task_id is None and clean_id.lower() in t["title"].lower()):
             _in_memory_tasks.remove(t)
+            return True
+    return False
+
+def update_task_db(
+    identifier: str, 
+    title: Optional[str] = None, 
+    status: Optional[str] = None, 
+    priority: Optional[int] = None, 
+    due_date: Optional[str] = None
+) -> bool:
+    """Update fields of an existing task by ID or title match."""
+    clean_id = str(identifier).strip()
+    if not clean_id:
+        return False
+
+    match = re.search(r"\b(\d+)\b", clean_id)
+    task_id = int(match.group(1)) if match else None
+
+    updates = []
+    params: List[Any] = []
+    if title is not None:
+        updates.append("title = %s")
+        params.append(title.strip())
+    if status is not None:
+        updates.append("status = %s")
+        params.append(status.strip().lower())
+        if status.strip().lower() == "done":
+            updates.append("completed_at = CURRENT_TIMESTAMP")
+    if priority is not None:
+        updates.append("priority = %s")
+        params.append(int(priority))
+    if due_date is not None:
+        updates.append("due_date = %s")
+        params.append(due_date.strip() if due_date.strip() else None)
+
+    if not updates:
+        return False
+
+    conn = _get_connection()
+    if conn:
+        try:
+            with conn.cursor() as cur:
+                sql_updates = ", ".join(updates)
+                if task_id is not None:
+                    query = f"UPDATE tasks SET {sql_updates} WHERE id = %s;"
+                    params.append(task_id)
+                else:
+                    query = f"UPDATE tasks SET {sql_updates} WHERE title ILIKE %s;"
+                    params.append(f"%{clean_id}%")
+
+                cur.execute(query, tuple(params))
+                updated = cur.rowcount > 0
+                conn.commit()
+                if updated:
+                    return True
+        except Exception as e:
+            logger.warning(f"Failed to update task in PostgreSQL: {e}")
+        finally:
+            conn.close()
+
+    # In-memory fallback
+    for t in _in_memory_tasks:
+        if (task_id is not None and t["id"] == task_id) or (task_id is None and clean_id.lower() in t["title"].lower()):
+            if title is not None:
+                t["title"] = title.strip()
+            if status is not None:
+                t["status"] = status.strip().lower()
+                if t["status"] == "done":
+                    t["completed_at"] = datetime.datetime.now().isoformat()
+            if priority is not None:
+                t["priority"] = int(priority)
+            if due_date is not None:
+                t["due_date"] = due_date.strip()
             return True
     return False

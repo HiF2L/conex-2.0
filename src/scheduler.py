@@ -49,14 +49,14 @@ async def send_evening_reflection(bot: Bot, target_user_id: int, memory_engine: 
     if not target_user_id:
         return
     
-    # 1. Fetch active tasks directly from PostgreSQL / Task Engine
+    # 1. Fetch active tasks for TODAY (max 10 items) directly from PostgreSQL / Task Engine
     from src.db import get_active_tasks_db
-    active_tasks = get_active_tasks_db()
+    active_tasks = get_active_tasks_db(today_only=True, limit=10)
     if active_tasks:
         task_items = [f"- [{t.get('project_name') or 'Общий'}] (ID: {t['id']}) {t['title']}" for t in active_tasks]
-        tasks_block = "АКТИВНЫЕ ЗАДАЧИ ИЗ БАЗЫ ДАННЫХ:\n" + "\n".join(task_items)
+        tasks_block = "АКТИВНЫЕ ЗАДАЧИ НА СЕГОДНЯ ИЗ БАЗЫ ДАННЫХ:\n" + "\n".join(task_items)
     else:
-        tasks_block = "АКТИВНЫЕ ЗАДАЧИ ИЗ БАЗЫ ДАННЫХ: Нет невыполненных задач."
+        tasks_block = "АКТИВНЫЕ ЗАДАЧИ НА СЕГОДНЯ ИЗ БАЗЫ ДАННЫХ: Нет невыполненных задач на сегодня."
 
     # 2. Assemble current active sprint state from Tier 2
     prompt, trace = memory_engine.assemble_prompt("Evening Sync task review and atomic planning for tomorrow.")
