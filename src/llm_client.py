@@ -456,9 +456,11 @@ class LLMClient:
                             item_res = get_qa_item_db(item_id)
 
                             if trace and hasattr(trace, "debug_steps"):
+                                src_match = re.search(r"Source File:\s*([^\s\|]+)", item_res)
+                                src_file = src_match.group(1).strip() if src_match else "memory"
                                 q_match = re.search(r"Question:\s*([^\n]+)", item_res)
                                 q_title = q_match.group(1).strip() if q_match else item_id
-                                trace.debug_steps.append(f"• 📌 `read_memory_item(\"{item_id}\")` -> Item: '{q_title}' ({len(item_res)} chars)")
+                                trace.debug_steps.append(f"• 📌 `read_memory_item(\"{item_id}\")` -> File: `{src_file}` | Anchor: '{q_title}' ({len(item_res)} chars)")
 
                             messages.append({"role": "tool", "tool_call_id": tool_call.id, "content": item_res})
 

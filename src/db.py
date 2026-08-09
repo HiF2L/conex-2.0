@@ -772,7 +772,7 @@ def get_qa_item_db(item_id: str) -> str:
                     for item in raw_data:
                         iid = str(item.get("id", "")).lower()
                         if iid == clean_id:
-                            return f"[Item ID: {item.get('id')}]\nQuestion: {item.get('question', '')}\nAnswer: {item.get('answer', '')}"
+                            return f"[Source File: {tier_file.name} | Item ID: {item.get('id')}]\nQuestion: {item.get('question', '')}\nAnswer: {item.get('answer', '')}"
             except Exception:
                 pass
 
