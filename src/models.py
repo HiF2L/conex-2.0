@@ -50,12 +50,13 @@ class MemoryTrace(BaseModel):
     t1_count: int = 0
     t2_count: int = 0
     t3_entities_loaded: Dict[str, int] = Field(default_factory=dict)
+    t3_sections_read: int = 0
     estimated_tokens: int = 0
     debug_steps: List[str] = Field(default_factory=list, description="Step-by-step tool execution logs for /debug mode")
 
     @property
     def t3_total(self) -> int:
-        return sum(self.t3_entities_loaded.values())
+        return self.t3_sections_read
 
     def format_trace_str(self) -> str:
         t3_parts = [f"{entity.capitalize()} ({count} Qs)" for entity, count in self.t3_entities_loaded.items()]

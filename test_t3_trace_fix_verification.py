@@ -29,28 +29,22 @@ def test_detect_entities_autoload():
     
     # Check assemble_prompt
     prompt, trace = engine.assemble_prompt(generic_query)
-    assert trace.t3_total > 0, f"trace.t3_total should be > 0, got {trace.t3_total}"
-    print(f"[OK] detect_entities auto-loaded {len(matched)} entities ({trace.t3_total} Qs).")
+    assert len(trace.t3_entities_loaded) > 0, "trace.t3_entities_loaded should be > 0"
+    print(f"[OK] detect_entities auto-loaded {len(matched)} entities ({len(trace.t3_entities_loaded)} entities loaded in prompt).")
 
 def test_dynamic_trace_tool_counting():
     print("\nTesting Dynamic Trace Tool Counting in generate_coaching_response...")
     client = LLMClient()
-    trace = MemoryTrace(t1_count=5, t2_count=5, t3_entities_loaded={"initial": 2}, estimated_tokens=100)
+    trace = MemoryTrace(t1_count=5, t2_count=5, estimated_tokens=100)
 
-    assert trace.t3_total == 2, f"Initial t3_total should be 2, got {trace.t3_total}"
+    assert trace.t3_sections_read == 0, f"Initial t3_sections_read should be 0, got {trace.t3_sections_read}"
 
-    # Simulate tool response update
-    tool_res = (
-        "Found 10 candidate memory entries matching 'projects':\n"
-        "1. [Section ID: 101 | Entity: WEGENY] Topic: Psychological matching\n"
-        "2. [Section ID: 102 | Entity: LIFEOS] Topic: ProactiveEngine"
-    )
-    
-    c = len(__import__("re").findall(r"Section ID|\d+\.\s+\[Entity", tool_res))
-    trace.t3_entities_loaded["retrieved_via_tools"] = trace.t3_entities_loaded.get("retrieved_via_tools", 0) + max(1, c)
+    # Simulate reading 1 section
+    trace.t3_sections_read += 1
 
-    assert trace.t3_total > 2, f"Updated t3_total should be > 2, got {trace.t3_total}"
-    print(f"[OK] Dynamic trace tool counting verified: new t3_total = {trace.t3_total}.")
+    assert trace.t3_sections_read == 1, f"Updated t3_sections_read should be 1, got {trace.t3_sections_read}"
+    assert trace.t3_total == 1
+    print(f"[OK] Dynamic trace tool counting verified: t3_sections_read = {trace.t3_sections_read}.")
 
 if __name__ == "__main__":
     print("================ T3 TRACE FIX & AUTOLOAD VERIFICATION ================")

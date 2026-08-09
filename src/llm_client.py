@@ -342,11 +342,7 @@ class LLMClient:
                             logger.info(f"LLM triggered tool search_memory(query='{query}')")
                             search_results = search_tier3_memory(query, top_k=10)
 
-                            if trace and hasattr(trace, "t3_entities_loaded"):
-                                c = len(re.findall(r"Section ID|\d+\.\s+\[Entity", search_results))
-                                curr = trace.t3_entities_loaded.get("retrieved_via_tools", 0)
-                                trace.t3_entities_loaded["retrieved_via_tools"] = curr + max(1, c)
-
+                            if trace and hasattr(trace, "debug_steps"):
                                 hits = re.findall(r"Entity:\s*([A-Za-z0-9_]+)", search_results)
                                 hits_str = ", ".join(list(dict.fromkeys(hits))[:5]) if hits else "0 hits"
                                 trace.debug_steps.append(f"• 🔍 `search_memory(\"{query}\")` -> Hits: [{hits_str}]")
@@ -367,11 +363,7 @@ class LLMClient:
                             logger.info(f"LLM triggered tool get_document_outline('{identifier}')")
                             outline_res = get_document_outline_db(identifier)
                             
-                            if trace and hasattr(trace, "t3_entities_loaded"):
-                                c = len(re.findall(r"Section ID", outline_res))
-                                curr = trace.t3_entities_loaded.get("retrieved_via_tools", 0)
-                                trace.t3_entities_loaded["retrieved_via_tools"] = curr + max(1, c)
-
+                            if trace and hasattr(trace, "debug_steps"):
                                 headers = re.findall(r"-\s*\[Section ID:\s*[^\]]+\]\s*Topic:\s*([^\n]+)", outline_res)
                                 headers_str = ", ".join([f"'{h.strip()}'" for h in headers[:4]]) if headers else "0 headers"
                                 trace.debug_steps.append(f"• 📋 `get_document_outline(\"{identifier}\")` -> Headers: [{headers_str}]")
@@ -389,9 +381,8 @@ class LLMClient:
                             logger.info(f"LLM triggered tool read_document_section('{identifier}', '{section_id}')")
                             sec_res = read_document_section_db(identifier, section_id)
                             
-                            if trace and hasattr(trace, "t3_entities_loaded"):
-                                curr = trace.t3_entities_loaded.get("retrieved_via_tools", 0)
-                                trace.t3_entities_loaded["retrieved_via_tools"] = curr + 1
+                            if trace and hasattr(trace, "t3_sections_read"):
+                                trace.t3_sections_read += 1
 
                                 q_match = re.search(r"Question:\s*([^\n]+)", sec_res)
                                 topic = q_match.group(1).strip() if q_match else section_id
@@ -410,10 +401,9 @@ class LLMClient:
                             logger.info(f"LLM triggered tool search_in_document('{identifier}', '{sub_query}')")
                             doc_search_res = search_in_document_db(identifier, sub_query)
 
-                            if trace and hasattr(trace, "t3_entities_loaded"):
+                            if trace and hasattr(trace, "t3_sections_read"):
                                 c = len(re.findall(r"Section ID", doc_search_res))
-                                curr = trace.t3_entities_loaded.get("retrieved_via_tools", 0)
-                                trace.t3_entities_loaded["retrieved_via_tools"] = curr + max(1, c)
+                                trace.t3_sections_read += max(1, c)
 
                                 matches = re.findall(r"Question:\s*([^\n]+)", doc_search_res)
                                 matches_str = ", ".join([f"'{m.strip()}'" for m in matches[:3]]) if matches else "0 matches"
@@ -431,10 +421,9 @@ class LLMClient:
                             logger.info(f"LLM triggered tool read_memory_entry('{identifier}')")
                             entry_res = read_memory_entry_db(identifier)
 
-                            if trace and hasattr(trace, "t3_entities_loaded"):
+                            if trace and hasattr(trace, "t3_sections_read"):
                                 c = len(re.findall(r"Section ID", entry_res))
-                                curr = trace.t3_entities_loaded.get("retrieved_via_tools", 0)
-                                trace.t3_entities_loaded["retrieved_via_tools"] = curr + max(1, c)
+                                trace.t3_sections_read += max(1, c)
 
                                 trace.debug_steps.append(f"• 📑 `read_memory_entry(\"{identifier}\")` -> Full document ({len(entry_res)} chars)")
 

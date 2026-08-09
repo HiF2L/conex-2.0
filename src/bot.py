@@ -324,7 +324,7 @@ def register_handlers(router: Router, memory_engine: MemoryEngine, llm_client: L
         save_chat_message(user_id, "assistant", response)
 
         # 5. Append status trace footer & debug log if enabled
-        trace_str = f"🧠 [Memory Trace: T1: {trace.t1_count} Qs | T2: {trace.t2_count} Qs | T3: {trace.t3_total} Qs | ~{trace.estimated_tokens} tokens]"
+        trace_str = f"🧠 [Memory Trace: T1: {trace.t1_count} Qs | T2: {trace.t2_count} Qs | T3: {trace.t3_sections_read} Secs | ~{trace.estimated_tokens} tokens]"
         debug_block = ""
         if user_debug_mode.get(user_id, False) and trace.debug_steps:
             steps_text = "\n".join(trace.debug_steps)
@@ -374,7 +374,7 @@ def register_handlers(router: Router, memory_engine: MemoryEngine, llm_client: L
         save_chat_message(user_id, "assistant", response)
 
         # 5. Append status trace footer & debug log if enabled
-        trace_str = f"🧠 [Memory Trace: T1: {trace.t1_count} Qs | T2: {trace.t2_count} Qs | T3: {trace.t3_total} Qs | ~{trace.estimated_tokens} tokens]"
+        trace_str = f"🧠 [Memory Trace: T1: {trace.t1_count} Qs | T2: {trace.t2_count} Qs | T3: {trace.t3_sections_read} Secs | ~{trace.estimated_tokens} tokens]"
         debug_block = ""
         if user_debug_mode.get(user_id, False) and trace.debug_steps:
             steps_text = "\n".join(trace.debug_steps)
