@@ -17,6 +17,30 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
+def is_trivial_user_turn(user_input: str) -> bool:
+    """
+    Returns True if the turn is a simple operational task command or brief greeting/acknowledgment.
+    Returns False for all non-trivial questions, conceptual queries, or reflective inquiries.
+    """
+    if not user_input or len(user_input.strip()) <= 5:
+        return True
+    
+    text = user_input.lower().strip()
+    
+    greetings = {"привет", "хай", "здравствуй", "добрый день", "спасибо", "ок", "хорошо", "понял", "hello", "hi", "thanks", "ok"}
+    if text in greetings:
+        return True
+
+    task_cmd_patterns = [
+        r"^(добавь|создай|удали|выполни|заверши|отмети|обнови)\s+(задачу|проект)\b",
+        r"^(complete|create|delete|update)\s+(task|project)\b"
+    ]
+    for pat in task_cmd_patterns:
+        if re.search(pat, text):
+            return True
+
+    return False
+
 class LLMClient:
     def __init__(self):
         # Main Provider Configuration (provod.ai)
@@ -276,13 +300,19 @@ class LLMClient:
                             messages.append({"role": turn["role"], "content": turn["content"]})
                 messages.append({"role": "user", "content": user_input})
 
+                is_non_trivial = not is_trivial_user_turn(user_input)
+
                 # Multi-step tool execution loop (up to 4 steps)
-                for _iteration in range(4):
+                for iteration in range(4):
+                    curr_tool_choice = "auto"
+                    if iteration == 0 and is_non_trivial:
+                        curr_tool_choice = {"type": "function", "function": {"name": "search_memory"}}
+
                     response = self.client.chat.completions.create(
                         model=self.default_model,
                         messages=messages,
                         tools=tools,
-                        tool_choice="auto",
+                        tool_choice=curr_tool_choice,
                         temperature=0.7
                     )
 

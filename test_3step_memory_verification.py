@@ -28,10 +28,8 @@ def test_3step_memory_directives():
     engine = MemoryEngine(memory_dir="data/memory")
     prompt, trace = engine.assemble_prompt("3-Step protocol test")
 
-    assert "3-STEP ULTRA-TOKEN-EFFICIENT MEMORY PROTOCOL" in prompt, "3-Step Protocol directive missing"
-    assert "Step 1: Call search_memory(query)" in prompt
-    assert "Step 2: Call get_document_outline(identifier)" in prompt
-    assert "Step 3: Call read_document_section(identifier, section_id)" in prompt
+    assert "DEFAULT PROACTIVE TIER 3 SEARCH PROTOCOL" in prompt, "Proactive T3 Protocol directive missing"
+    assert "search_memory -> get_document_outline -> read_document_section" in prompt
     print("[OK] 3-Step Memory Protocol directive verified in System Prompt.")
 
 def test_granular_memory_db_functions():
