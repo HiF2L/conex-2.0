@@ -74,7 +74,8 @@ class LLMClient:
         system_prompt: str, 
         user_input: str, 
         chat_history: Optional[List[Dict[str, str]]] = None,
-        memory_engine: Optional[Any] = None
+        memory_engine: Optional[Any] = None,
+        trace: Optional[Any] = None
     ) -> str:
         """
         Generate coaching agent response using DEFAULT_MODEL.
@@ -341,6 +342,11 @@ class LLMClient:
                             logger.info(f"LLM triggered tool search_memory(query='{query}')")
                             search_results = search_tier3_memory(query, top_k=10)
 
+                            if trace and hasattr(trace, "t3_entities_loaded"):
+                                c = len(re.findall(r"Section ID|\d+\.\s+\[Entity", search_results))
+                                curr = trace.t3_entities_loaded.get("retrieved_via_tools", 0)
+                                trace.t3_entities_loaded["retrieved_via_tools"] = curr + max(1, c)
+
                             messages.append({
                                 "role": "tool",
                                 "tool_call_id": tool_call.id,
@@ -356,6 +362,12 @@ class LLMClient:
                                 identifier = ""
                             logger.info(f"LLM triggered tool get_document_outline('{identifier}')")
                             outline_res = get_document_outline_db(identifier)
+                            
+                            if trace and hasattr(trace, "t3_entities_loaded"):
+                                c = len(re.findall(r"Section ID", outline_res))
+                                curr = trace.t3_entities_loaded.get("retrieved_via_tools", 0)
+                                trace.t3_entities_loaded["retrieved_via_tools"] = curr + max(1, c)
+
                             messages.append({"role": "tool", "tool_call_id": tool_call.id, "content": outline_res})
 
                         elif fn_name == "read_document_section":
@@ -368,6 +380,11 @@ class LLMClient:
                                 identifier, section_id = "", ""
                             logger.info(f"LLM triggered tool read_document_section('{identifier}', '{section_id}')")
                             sec_res = read_document_section_db(identifier, section_id)
+                            
+                            if trace and hasattr(trace, "t3_entities_loaded"):
+                                curr = trace.t3_entities_loaded.get("retrieved_via_tools", 0)
+                                trace.t3_entities_loaded["retrieved_via_tools"] = curr + 1
+
                             messages.append({"role": "tool", "tool_call_id": tool_call.id, "content": sec_res})
 
                         elif fn_name == "search_in_document":
@@ -380,6 +397,12 @@ class LLMClient:
                                 identifier, sub_query = "", ""
                             logger.info(f"LLM triggered tool search_in_document('{identifier}', '{sub_query}')")
                             doc_search_res = search_in_document_db(identifier, sub_query)
+
+                            if trace and hasattr(trace, "t3_entities_loaded"):
+                                c = len(re.findall(r"Section ID", doc_search_res))
+                                curr = trace.t3_entities_loaded.get("retrieved_via_tools", 0)
+                                trace.t3_entities_loaded["retrieved_via_tools"] = curr + max(1, c)
+
                             messages.append({"role": "tool", "tool_call_id": tool_call.id, "content": doc_search_res})
 
                         elif fn_name == "read_memory_entry":
@@ -391,6 +414,12 @@ class LLMClient:
                                 identifier = ""
                             logger.info(f"LLM triggered tool read_memory_entry('{identifier}')")
                             entry_res = read_memory_entry_db(identifier)
+
+                            if trace and hasattr(trace, "t3_entities_loaded"):
+                                c = len(re.findall(r"Section ID", entry_res))
+                                curr = trace.t3_entities_loaded.get("retrieved_via_tools", 0)
+                                trace.t3_entities_loaded["retrieved_via_tools"] = curr + max(1, c)
+
                             messages.append({"role": "tool", "tool_call_id": tool_call.id, "content": entry_res})
 
                         elif fn_name == "forget_memory" and memory_engine:

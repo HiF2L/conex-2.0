@@ -95,7 +95,9 @@ class MemoryEngine:
     def detect_entities(self, user_input: str) -> Dict[str, List[QAPair]]:
         """
         Detects if any Tier 3 entity is mentioned in user_input.
-        Returns top-3 highest-weighted QA pairs for each matched entity.
+        Returns top-3 highest-weighted QA pairs for matched entities.
+        If no specific entity is matched, auto-loads top-2 QA pairs for all registered entities.
+        100% domain-agnostic with zero hardcoded entity names.
         """
         input_lower = user_input.lower()
         matched_entities = {}
@@ -103,8 +105,13 @@ class MemoryEngine:
         for entity_name, qa_list in self.tier3_entities.items():
             # Match entity name or keywords
             if entity_name in input_lower or entity_name.replace("_", " ") in input_lower:
-                # Sort by weight descending, pick top 3
                 sorted_qa = sorted(qa_list, key=lambda x: x.weight, reverse=True)[:3]
+                matched_entities[entity_name] = sorted_qa
+
+        # If no specific entity name was mentioned, load top QA pairs across all registered entities
+        if not matched_entities and self.tier3_entities:
+            for entity_name, qa_list in self.tier3_entities.items():
+                sorted_qa = sorted(qa_list, key=lambda x: x.weight, reverse=True)[:2]
                 matched_entities[entity_name] = sorted_qa
 
         return matched_entities
