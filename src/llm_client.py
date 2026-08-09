@@ -198,7 +198,73 @@ class LLMClient:
             }
         }
 
-        tools = [search_tool, forget_tool, create_project_tool, create_task_tool, complete_task_tool, list_tasks_tool, delete_task_tool, update_task_tool]
+        get_document_outline_tool = {
+            "type": "function",
+            "function": {
+                "name": "get_document_outline",
+                "description": "Inspect the Table of Contents / section headers of a Tier 3 document/entity without loading full text.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "identifier": {"type": "string", "description": "Document/entity name or ID"}
+                    },
+                    "required": ["identifier"]
+                }
+            }
+        }
+
+        read_document_section_tool = {
+            "type": "function",
+            "function": {
+                "name": "read_document_section",
+                "description": "Retrieve full text of a specific section ID or topic within a document/entity.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "identifier": {"type": "string", "description": "Document/entity name or ID"},
+                        "section_id": {"type": "string", "description": "Section ID or topic substring"}
+                    },
+                    "required": ["identifier", "section_id"]
+                }
+            }
+        }
+
+        search_in_document_tool = {
+            "type": "function",
+            "function": {
+                "name": "search_in_document",
+                "description": "Perform targeted keyword search within a specific document/entity to extract matching section snippets.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "identifier": {"type": "string", "description": "Document/entity name or ID"},
+                        "sub_query": {"type": "string", "description": "Sub-query keywords to search inside document"}
+                    },
+                    "required": ["identifier", "sub_query"]
+                }
+            }
+        }
+
+        read_memory_entry_tool = {
+            "type": "function",
+            "function": {
+                "name": "read_memory_entry",
+                "description": "Read complete text of a specified document or entity when full context is required.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "identifier": {"type": "string", "description": "Document/entity name or ID"}
+                    },
+                    "required": ["identifier"]
+                }
+            }
+        }
+
+        tools = [
+            search_tool, forget_tool, create_project_tool, create_task_tool, 
+            complete_task_tool, list_tasks_tool, delete_task_tool, update_task_tool,
+            get_document_outline_tool, read_document_section_tool, search_in_document_tool, read_memory_entry_tool
+        ]
 
         if self.is_api_configured():
             try:
@@ -210,24 +276,32 @@ class LLMClient:
                             messages.append({"role": turn["role"], "content": turn["content"]})
                 messages.append({"role": "user", "content": user_input})
 
-                # Initial completion call with tools enabled
-                response = self.client.chat.completions.create(
-                    model=self.default_model,
-                    messages=messages,
-                    tools=tools,
-                    tool_choice="auto",
-                    temperature=0.7
-                )
-                
-                choice = response.choices[0]
+                # Multi-step tool execution loop (up to 4 steps)
+                for _iteration in range(4):
+                    response = self.client.chat.completions.create(
+                        model=self.default_model,
+                        messages=messages,
+                        tools=tools,
+                        tool_choice="auto",
+                        temperature=0.7
+                    )
 
-                # Check if model requested tool call
-                if choice.message.tool_calls:
-                    messages.append(choice.message) # append assistant tool request
-                    
+                    if not response.choices:
+                        break
+
+                    choice = response.choices[0]
+                    if not choice.message.tool_calls:
+                        if choice.message.content:
+                            return self._sanitize_tool_leak(choice.message.content.strip())
+                        break
+
+                    # Append model's tool call message
+                    messages.append(choice.message)
+
                     for tool_call in choice.message.tool_calls:
                         fn_name = tool_call.function.name
                         if fn_name == "search_memory":
+                            from src.db import search_tier3_memory
                             try:
                                 args = json.loads(tool_call.function.arguments)
                                 query = args.get("query", user_input)
@@ -235,13 +309,59 @@ class LLMClient:
                                 query = user_input
                             
                             logger.info(f"LLM triggered tool search_memory(query='{query}')")
-                            search_results = search_tier3_memory(query)
-                            
+                            search_results = search_tier3_memory(query, top_k=10)
+
                             messages.append({
                                 "role": "tool",
                                 "tool_call_id": tool_call.id,
                                 "content": search_results
                             })
+
+                        elif fn_name == "get_document_outline":
+                            from src.db import get_document_outline_db
+                            try:
+                                args = json.loads(tool_call.function.arguments)
+                                identifier = args.get("identifier", "")
+                            except Exception:
+                                identifier = ""
+                            logger.info(f"LLM triggered tool get_document_outline('{identifier}')")
+                            outline_res = get_document_outline_db(identifier)
+                            messages.append({"role": "tool", "tool_call_id": tool_call.id, "content": outline_res})
+
+                        elif fn_name == "read_document_section":
+                            from src.db import read_document_section_db
+                            try:
+                                args = json.loads(tool_call.function.arguments)
+                                identifier = args.get("identifier", "")
+                                section_id = args.get("section_id", "")
+                            except Exception:
+                                identifier, section_id = "", ""
+                            logger.info(f"LLM triggered tool read_document_section('{identifier}', '{section_id}')")
+                            sec_res = read_document_section_db(identifier, section_id)
+                            messages.append({"role": "tool", "tool_call_id": tool_call.id, "content": sec_res})
+
+                        elif fn_name == "search_in_document":
+                            from src.db import search_in_document_db
+                            try:
+                                args = json.loads(tool_call.function.arguments)
+                                identifier = args.get("identifier", "")
+                                sub_query = args.get("sub_query", "")
+                            except Exception:
+                                identifier, sub_query = "", ""
+                            logger.info(f"LLM triggered tool search_in_document('{identifier}', '{sub_query}')")
+                            doc_search_res = search_in_document_db(identifier, sub_query)
+                            messages.append({"role": "tool", "tool_call_id": tool_call.id, "content": doc_search_res})
+
+                        elif fn_name == "read_memory_entry":
+                            from src.db import read_memory_entry_db
+                            try:
+                                args = json.loads(tool_call.function.arguments)
+                                identifier = args.get("identifier", "")
+                            except Exception:
+                                identifier = ""
+                            logger.info(f"LLM triggered tool read_memory_entry('{identifier}')")
+                            entry_res = read_memory_entry_db(identifier)
+                            messages.append({"role": "tool", "tool_call_id": tool_call.id, "content": entry_res})
 
                         elif fn_name == "forget_memory" and memory_engine:
                             try:
@@ -331,18 +451,6 @@ class LLMClient:
                                 success = False
                             logger.info(f"LLM triggered tool update_task: success={success}")
                             messages.append({"role": "tool", "tool_call_id": tool_call.id, "content": f"Task update result: {success}"})
-
-                    # Second call to generate final answer using tool execution results
-                    final_response = self.client.chat.completions.create(
-                        model=self.default_model,
-                        messages=messages,
-                        temperature=0.7
-                    )
-                    if final_response.choices and final_response.choices[0].message.content:
-                        return self._sanitize_tool_leak(final_response.choices[0].message.content.strip())
-
-                elif choice.message.content:
-                    return self._sanitize_tool_leak(choice.message.content.strip())
 
             except Exception as e:
                 logger.warning(f"API call failed: {e}. Falling back to offline simulator.")

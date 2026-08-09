@@ -381,10 +381,10 @@ def sync_tier3_to_postgres(memory_dir: str = "data/memory") -> int:
     finally:
         conn.close()
 
-def search_tier3_memory(query: str, top_k: int = 4) -> str:
+def search_tier3_memory(query: str, top_k: int = 10) -> str:
     """
-    Executes PostgreSQL Hybrid Vector + Full-Text Search query to retrieve relevant Tier 3 memory items.
-    Falls back to local YAML search if PostgreSQL is offline or yields no rows.
+    Executes PostgreSQL Hybrid Vector + Full-Text Search query to retrieve top-10 candidate memory hits.
+    Returns lightweight candidate titles and Section IDs so the LLM can inspect outlines/sections token-efficiently.
     """
     from src.llm_client import LLMClient
     clean_query = query.strip()
@@ -397,46 +397,73 @@ def search_tier3_memory(query: str, top_k: int = 4) -> str:
     if conn:
         try:
             with conn.cursor() as cur:
-                # Generate query vector via ProxyAPI
                 llm_client = LLMClient()
                 q_vec = llm_client.generate_embedding(clean_query)
 
-                # Check if pgvector column exists
                 cur.execute("""
                     SELECT data_type FROM information_schema.columns 
                     WHERE table_name = 'tier3_memory_index' AND column_name = 'embedding';
                 """)
                 has_vector_col = bool(cur.fetchone())
 
+                cur.execute("""
+                    SELECT data_type FROM information_schema.columns 
+                    WHERE table_name = 'tier3_memory_index' AND column_name = 'id';
+                """)
+                has_id_col = bool(cur.fetchone())
+
                 like_pattern = f"%{clean_query}%"
 
                 if has_vector_col and q_vec:
                     q_vec_str = str(q_vec)
-                    cur.execute("""
-                        SELECT entity_name, question, answer, weight, valid_from,
-                               (ts_rank(search_vector, websearch_to_tsquery('russian', %s)) +
-                                ts_rank(search_vector, websearch_to_tsquery('english', %s)) +
-                                COALESCE(1.0 - (embedding <=> %s::vector), 0.0)) AS rank
-                        FROM tier3_memory_index
-                        ORDER BY rank DESC, weight DESC
-                        LIMIT %s;
-                    """, (clean_query, clean_query, q_vec_str, top_k))
+                    if has_id_col:
+                        cur.execute("""
+                            SELECT id, entity_name, question, answer, weight,
+                                   (ts_rank(search_vector, websearch_to_tsquery('russian', %s)) +
+                                    ts_rank(search_vector, websearch_to_tsquery('english', %s)) +
+                                    COALESCE(1.0 - (embedding <=> %s::vector), 0.0)) AS rank
+                            FROM tier3_memory_index
+                            ORDER BY rank DESC, weight DESC
+                            LIMIT %s;
+                        """, (clean_query, clean_query, q_vec_str, top_k))
+                    else:
+                        cur.execute("""
+                            SELECT entity_name, question, answer, weight,
+                                   (ts_rank(search_vector, websearch_to_tsquery('russian', %s)) +
+                                    ts_rank(search_vector, websearch_to_tsquery('english', %s)) +
+                                    COALESCE(1.0 - (embedding <=> %s::vector), 0.0)) AS rank
+                            FROM tier3_memory_index
+                            ORDER BY rank DESC, weight DESC
+                            LIMIT %s;
+                        """, (clean_query, clean_query, q_vec_str, top_k))
                 else:
-                    cur.execute("""
-                        SELECT entity_name, question, answer, weight, valid_from,
-                               (ts_rank(search_vector, websearch_to_tsquery('russian', %s)) +
-                                ts_rank(search_vector, websearch_to_tsquery('english', %s))) AS rank
-                        FROM tier3_memory_index
-                        WHERE search_vector @@ websearch_to_tsquery('russian', %s)
-                           OR search_vector @@ websearch_to_tsquery('english', %s)
-                           OR question ILIKE %s OR answer ILIKE %s OR entity_name ILIKE %s
-                        ORDER BY rank DESC, weight DESC
-                        LIMIT %s;
-                    """, (clean_query, clean_query, clean_query, clean_query, like_pattern, like_pattern, like_pattern, top_k))
+                    if has_id_col:
+                        cur.execute("""
+                            SELECT id, entity_name, question, answer, weight,
+                                   (ts_rank(search_vector, websearch_to_tsquery('russian', %s)) +
+                                    ts_rank(search_vector, websearch_to_tsquery('english', %s))) AS rank
+                            FROM tier3_memory_index
+                            WHERE search_vector @@ websearch_to_tsquery('russian', %s)
+                               OR search_vector @@ websearch_to_tsquery('english', %s)
+                               OR question ILIKE %s OR answer ILIKE %s OR entity_name ILIKE %s
+                            ORDER BY rank DESC, weight DESC
+                            LIMIT %s;
+                        """, (clean_query, clean_query, clean_query, clean_query, like_pattern, like_pattern, like_pattern, top_k))
+                    else:
+                        cur.execute("""
+                            SELECT entity_name, question, answer, weight,
+                                   (ts_rank(search_vector, websearch_to_tsquery('russian', %s)) +
+                                    ts_rank(search_vector, websearch_to_tsquery('english', %s))) AS rank
+                            FROM tier3_memory_index
+                            WHERE search_vector @@ websearch_to_tsquery('russian', %s)
+                               OR search_vector @@ websearch_to_tsquery('english', %s)
+                               OR question ILIKE %s OR answer ILIKE %s OR entity_name ILIKE %s
+                            ORDER BY rank DESC, weight DESC
+                            LIMIT %s;
+                        """, (clean_query, clean_query, clean_query, clean_query, like_pattern, like_pattern, like_pattern, top_k))
                 
                 rows = cur.fetchall()
                 if not rows:
-                    # Token-based multi-field ILIKE fallback for broad or multi-word queries
                     tokens = [t for t in re.findall(r"\w+", clean_query) if len(t) > 2]
                     if tokens:
                         token_clauses = []
@@ -447,53 +474,285 @@ def search_tier3_memory(query: str, top_k: int = 4) -> str:
                             params_tok.extend([pat, pat, pat])
                         tok_sql = " OR ".join(token_clauses)
                         params_tok.append(top_k)
-                        cur.execute(f"""
-                            SELECT entity_name, question, answer, weight, valid_from
-                            FROM tier3_memory_index
-                            WHERE {tok_sql}
-                            ORDER BY weight DESC
-                            LIMIT %s;
-                        """, tuple(params_tok))
+                        if has_id_col:
+                            cur.execute(f"""
+                                SELECT id, entity_name, question, answer, weight
+                                FROM tier3_memory_index
+                                WHERE {tok_sql}
+                                ORDER BY weight DESC
+                                LIMIT %s;
+                            """, tuple(params_tok))
+                        else:
+                            cur.execute(f"""
+                                SELECT entity_name, question, answer, weight
+                                FROM tier3_memory_index
+                                WHERE {tok_sql}
+                                ORDER BY weight DESC
+                                LIMIT %s;
+                            """, tuple(params_tok))
                         rows = cur.fetchall()
 
                 if not rows:
-                    # Generic top-K highest-weighted fallback so queries always return memory context
-                    cur.execute("""
-                        SELECT entity_name, question, answer, weight, valid_from
-                        FROM tier3_memory_index
-                        ORDER BY weight DESC
-                        LIMIT %s;
-                    """, (top_k,))
+                    if has_id_col:
+                        cur.execute("""
+                            SELECT id, entity_name, question, answer, weight
+                            FROM tier3_memory_index
+                            ORDER BY weight DESC
+                            LIMIT %s;
+                        """, (top_k,))
+                    else:
+                        cur.execute("""
+                            SELECT entity_name, question, answer, weight
+                            FROM tier3_memory_index
+                            ORDER BY weight DESC
+                            LIMIT %s;
+                        """, (top_k,))
                     rows = cur.fetchall()
 
                 for r in rows:
-                    results.append({
-                        "entity": r[0],
-                        "question": r[1],
-                        "answer": r[2],
-                        "weight": r[3],
-                        "valid_from": r[4]
-                    })
+                    if has_id_col:
+                        results.append({
+                            "id": str(r[0]),
+                            "entity": r[1],
+                            "question": r[2],
+                            "answer": r[3],
+                            "weight": r[4]
+                        })
+                    else:
+                        results.append({
+                            "id": r[0],
+                            "entity": r[0],
+                            "question": r[1],
+                            "answer": r[2],
+                            "weight": r[3]
+                        })
         except Exception as e:
             logger.warning(f"PostgreSQL hybrid search error: {e}. Switching to YAML search fallback.")
         finally:
             conn.close()
 
-    # Fallback to local YAML search if DB returned no results
     if not results:
         results = _fallback_yaml_search(clean_query, top_k=top_k)
 
     if not results:
-        return f"No long-term memory entries found matching '{clean_query}'."
+        return f"No long-term memory candidate entries found matching '{clean_query}'."
 
-    output_lines = [f"Found {len(results)} relevant entries in Tier 3 Memory for '{clean_query}':\n"]
+    output_lines = [f"Found {len(results)} candidate memory entries matching '{clean_query}'. (To inspect without reading full text, call get_document_outline(entity) or read_document_section(entity, section_id)):\n"]
     for idx, item in enumerate(results, 1):
+        sec_id = item.get('id', idx)
         output_lines.append(
-            f"{idx}. [Entity: {item['entity'].upper()}] Question: {item['question']}\n"
-            f"   Answer: {item['answer']} (weight: {item.get('weight', 1.0)})"
+            f"{idx}. [Section ID: {sec_id} | Entity: {item['entity'].upper()}] Topic: {item['question']}"
         )
 
-    return "\n\n".join(output_lines)
+    return "\n".join(output_lines)
+
+def get_document_outline_db(identifier: str) -> str:
+    """
+    Returns the Table of Contents / Section Outline for a document or entity.
+    Allows the agent to see all section headers without loading full text.
+    """
+    clean_id = identifier.strip().lower()
+    if not clean_id:
+        return "No document identifier provided."
+
+    conn = _get_connection()
+    sections = []
+
+    if conn:
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT id, entity_name, question, weight 
+                    FROM tier3_memory_index 
+                    WHERE entity_name ILIKE %s OR CAST(id AS TEXT) = %s OR question ILIKE %s
+                    ORDER BY weight DESC;
+                """, (f"%{clean_id}%", clean_id, f"%{clean_id}%"))
+                rows = cur.fetchall()
+                for r in rows:
+                    sections.append({"id": str(r[0]), "entity": r[1], "question": r[2], "weight": r[3]})
+        except Exception as e:
+            logger.warning(f"PostgreSQL get_document_outline error: {e}")
+        finally:
+            conn.close()
+
+    if not sections:
+        # Local YAML fallback
+        tier3_dir = Path("data/memory/tier3_entities")
+        if tier3_dir.exists():
+            for fpath in tier3_dir.glob("*.yaml"):
+                if clean_id in fpath.stem.lower() or fpath.stem.lower() in clean_id:
+                    try:
+                        with open(fpath, "r", encoding="utf-8") as f:
+                            raw_data = yaml.safe_load(f)
+                        if isinstance(raw_data, list):
+                            for idx, item in enumerate(raw_data, 1):
+                                sections.append({
+                                    "id": f"{fpath.stem}_{idx}",
+                                    "entity": fpath.stem,
+                                    "question": item.get("question", ""),
+                                    "weight": item.get("weight", 1.0)
+                                })
+                    except Exception:
+                        pass
+
+    if not sections:
+        return f"No document outline found for '{identifier}'."
+
+    output_lines = [f"Document Outline for '{identifier.upper()}' ({len(sections)} sections total):"]
+    for s in sections:
+        output_lines.append(f"  - [Section ID: {s['id']}] Topic: {s['question']}")
+
+    output_lines.append("\nUse read_document_section(identifier, section_id) to retrieve specific section text.")
+    return "\n".join(output_lines)
+
+def read_document_section_db(identifier: str, section_id: str) -> str:
+    """
+    Returns the exact text of a specific section inside a document/entity.
+    """
+    clean_sec = section_id.strip()
+    clean_id = identifier.strip().lower()
+
+    conn = _get_connection()
+    if conn:
+        try:
+            with conn.cursor() as cur:
+                # Direct ID match using string representation
+                cur.execute("""
+                    SELECT entity_name, question, answer, weight 
+                    FROM tier3_memory_index 
+                    WHERE CAST(id AS TEXT) = %s;
+                """, (clean_sec,))
+                row = cur.fetchone()
+                if row:
+                    return f"[Entity: {row[0].upper()} | Section ID: {clean_sec}]\nQuestion: {row[1]}\nAnswer: {row[2]}"
+
+                # Question substring match
+                cur.execute("""
+                    SELECT entity_name, question, answer, weight 
+                    FROM tier3_memory_index 
+                    WHERE (entity_name ILIKE %s OR CAST(id AS TEXT) = %s)
+                      AND (question ILIKE %s OR CAST(id AS TEXT) = %s)
+                    LIMIT 1;
+                """, (f"%{clean_id}%", clean_id, f"%{clean_sec}%", clean_sec))
+                row = cur.fetchone()
+                if row:
+                    return f"[Entity: {row[0].upper()} | Section ID: {clean_sec}]\nQuestion: {row[1]}\nAnswer: {row[2]}"
+        except Exception as e:
+            logger.warning(f"PostgreSQL read_document_section error: {e}")
+        finally:
+            conn.close()
+
+    # YAML Fallback
+    tier3_dir = Path("data/memory/tier3_entities")
+    if tier3_dir.exists():
+        for fpath in tier3_dir.glob("*.yaml"):
+            if clean_id in fpath.stem.lower() or fpath.stem.lower() in clean_id:
+                try:
+                    with open(fpath, "r", encoding="utf-8") as f:
+                        raw_data = yaml.safe_load(f)
+                    if isinstance(raw_data, list):
+                        for idx, item in enumerate(raw_data, 1):
+                            if str(idx) in clean_sec or clean_sec in str(item.get("question", "")).lower():
+                                return f"[Entity: {fpath.stem.upper()} | Section ID: {idx}]\nQuestion: {item.get('question')}\nAnswer: {item.get('answer')}"
+                except Exception:
+                    pass
+
+    return f"Section '{section_id}' in document '{identifier}' not found."
+
+def search_in_document_db(identifier: str, sub_query: str) -> str:
+    """
+    Performs targeted search within a specific document/entity to extract matching section snippets.
+    """
+    clean_id = identifier.strip().lower()
+    clean_sub = sub_query.strip().lower()
+
+    conn = _get_connection()
+    matches = []
+
+    if conn:
+        try:
+            with conn.cursor() as cur:
+                like_pat = f"%{clean_sub}%"
+                cur.execute("""
+                    SELECT id, entity_name, question, answer 
+                    FROM tier3_memory_index 
+                    WHERE (entity_name ILIKE %s OR CAST(id AS TEXT) = %s)
+                      AND (question ILIKE %s OR answer ILIKE %s)
+                    ORDER BY weight DESC;
+                """, (f"%{clean_id}%", clean_id, like_pat, like_pat))
+                rows = cur.fetchall()
+                for r in rows:
+                    matches.append({"id": str(r[0]), "entity": r[1], "question": r[2], "answer": r[3]})
+        except Exception as e:
+            logger.warning(f"PostgreSQL search_in_document error: {e}")
+        finally:
+            conn.close()
+
+    if not matches:
+        return f"No sections matching '{sub_query}' found inside document '{identifier}'."
+
+    output_lines = [f"Found {len(matches)} matching sections in document '{identifier.upper()}' for '{sub_query}':\n"]
+    for idx, m in enumerate(matches, 1):
+        output_lines.append(f"{idx}. [Section ID: {m['id']}] Question: {m['question']}\n   Answer: {m['answer']}\n")
+
+    return "\n".join(output_lines)
+
+def read_memory_entry_db(identifier: str) -> str:
+    """
+    Reads complete text of specified document or entity.
+    """
+    clean_id = identifier.strip().lower()
+    if not clean_id:
+        return "No identifier provided."
+
+    conn = _get_connection()
+    entries = []
+
+    if conn:
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT id, entity_name, question, answer, weight 
+                    FROM tier3_memory_index 
+                    WHERE entity_name ILIKE %s OR CAST(id AS TEXT) = %s OR question ILIKE %s
+                    ORDER BY weight DESC;
+                """, (f"%{clean_id}%", clean_id, f"%{clean_id}%"))
+                rows = cur.fetchall()
+                for r in rows:
+                    entries.append({"id": str(r[0]), "entity": r[1], "question": r[2], "answer": r[3], "weight": r[4]})
+        except Exception as e:
+            logger.warning(f"PostgreSQL read_memory_entry error: {e}")
+        finally:
+            conn.close()
+
+    if not entries:
+        tier3_dir = Path("data/memory/tier3_entities")
+        if tier3_dir.exists():
+            for fpath in tier3_dir.glob("*.yaml"):
+                if clean_id in fpath.stem.lower() or fpath.stem.lower() in clean_id:
+                    try:
+                        with open(fpath, "r", encoding="utf-8") as f:
+                            raw_data = yaml.safe_load(f)
+                        if isinstance(raw_data, list):
+                            for idx, item in enumerate(raw_data, 1):
+                                entries.append({
+                                    "id": f"{fpath.stem}_{idx}",
+                                    "entity": fpath.stem,
+                                    "question": item.get("question", ""),
+                                    "answer": item.get("answer", ""),
+                                    "weight": item.get("weight", 1.0)
+                                })
+                    except Exception:
+                        pass
+
+    if not entries:
+        return f"No full memory entry found for '{identifier}'."
+
+    output_lines = [f"Full Memory Document for '{identifier.upper()}' ({len(entries)} items):\n"]
+    for idx, e in enumerate(entries, 1):
+        output_lines.append(f"{idx}. [Section ID: {e['id']}] Question: {e['question']}\n   Answer: {e['answer']}\n")
+
+    return "\n".join(output_lines)
 
 def _fallback_yaml_search(query: str, top_k: int = 4) -> List[Dict[str, Any]]:
     """Local YAML search fallback when PostgreSQL is offline or FTS finds no matches."""
