@@ -754,6 +754,49 @@ def read_memory_entry_db(identifier: str) -> str:
 
     return "\n".join(output_lines)
 
+def get_qa_item_db(item_id: str) -> str:
+    """
+    Look up exact QA pair answer by item_id across Tier 1, Tier 2, and Tier 3.
+    """
+    clean_id = item_id.strip().lower()
+    if not clean_id:
+        return "No item_id provided."
+
+    # Check Tier 1 & Tier 2 YAML files first
+    for tier_file in [Path("data/memory/tier1_core.yaml"), Path("data/memory/tier2_state.yaml")]:
+        if tier_file.exists():
+            try:
+                with open(tier_file, "r", encoding="utf-8") as f:
+                    raw_data = yaml.safe_load(f)
+                if isinstance(raw_data, list):
+                    for item in raw_data:
+                        iid = str(item.get("id", "")).lower()
+                        if iid == clean_id:
+                            return f"[Item ID: {item.get('id')}]\nQuestion: {item.get('question', '')}\nAnswer: {item.get('answer', '')}"
+            except Exception:
+                pass
+
+    # Check PostgreSQL
+    conn = _get_connection()
+    if conn:
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    SELECT id, entity_name, question, answer 
+                    FROM tier3_memory_index 
+                    WHERE CAST(id AS TEXT) = %s OR id ILIKE %s
+                    LIMIT 1;
+                """, (clean_id, clean_id))
+                row = cur.fetchone()
+                if row:
+                    return f"[Item ID: {row[0]} | Entity: {row[1]}]\nQuestion: {row[2]}\nAnswer: {row[3]}"
+        except Exception:
+            pass
+        finally:
+            conn.close()
+
+    return f"No memory item found matching ID '{item_id}'."
+
 def _fallback_yaml_search(query: str, top_k: int = 4) -> List[Dict[str, Any]]:
     """Local YAML search fallback when PostgreSQL is offline or FTS finds no matches."""
     tier3_dir = Path("data/memory/tier3_entities")

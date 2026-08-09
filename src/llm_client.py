@@ -285,10 +285,26 @@ class LLMClient:
             }
         }
 
+        read_memory_item_tool = {
+            "type": "function",
+            "function": {
+                "name": "read_memory_item",
+                "description": "Retrieve the exact factual answer for any Tier 1 Core Profile or Tier 2 Dynamic State Question Anchor by its item_id.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "item_id": {"type": "string", "description": "The item ID from Tier 1 or Tier 2 index (e.g., 't1_1', 't2_5')"}
+                    },
+                    "required": ["item_id"]
+                }
+            }
+        }
+
         tools = [
             search_tool, forget_tool, create_project_tool, create_task_tool, 
             complete_task_tool, list_tasks_tool, delete_task_tool, update_task_tool,
-            get_document_outline_tool, read_document_section_tool, search_in_document_tool, read_memory_entry_tool
+            get_document_outline_tool, read_document_section_tool, search_in_document_tool, read_memory_entry_tool,
+            read_memory_item_tool
         ]
 
         if self.is_api_configured():
@@ -428,6 +444,23 @@ class LLMClient:
                                 trace.debug_steps.append(f"• 📑 `read_memory_entry(\"{identifier}\")` -> Full document ({len(entry_res)} chars)")
 
                             messages.append({"role": "tool", "tool_call_id": tool_call.id, "content": entry_res})
+
+                        elif fn_name == "read_memory_item":
+                            from src.db import get_qa_item_db
+                            try:
+                                args = json.loads(tool_call.function.arguments)
+                                item_id = args.get("item_id", "")
+                            except Exception:
+                                item_id = ""
+                            logger.info(f"LLM triggered tool read_memory_item('{item_id}')")
+                            item_res = get_qa_item_db(item_id)
+
+                            if trace and hasattr(trace, "debug_steps"):
+                                q_match = re.search(r"Question:\s*([^\n]+)", item_res)
+                                q_title = q_match.group(1).strip() if q_match else item_id
+                                trace.debug_steps.append(f"• 📌 `read_memory_item(\"{item_id}\")` -> Item: '{q_title}' ({len(item_res)} chars)")
+
+                            messages.append({"role": "tool", "tool_call_id": tool_call.id, "content": item_res})
 
                         elif fn_name == "forget_memory" and memory_engine:
                             try:

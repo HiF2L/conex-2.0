@@ -116,9 +116,26 @@ class MemoryEngine:
 
         return matched_entities
 
+    def get_memory_item_by_id(self, item_id: str) -> Optional[QAPair]:
+        """
+        Locate any QA pair by ID across Tier 1, Tier 2, or loaded Tier 3 entities.
+        """
+        target = item_id.strip().lower()
+        for qa in self.tier1_items:
+            if qa.id.lower() == target:
+                return qa
+        for qa in self.tier2_items:
+            if qa.id.lower() == target:
+                return qa
+        for entity_name, qa_list in self.tier3_entities.items():
+            for qa in qa_list:
+                if qa.id.lower() == target:
+                    return qa
+        return None
+
     def assemble_prompt(self, user_input: str) -> Tuple[str, MemoryTrace]:
         """
-        Assemble dense YAML/Markdown system prompt using loaded Tier 1, Tier 2,
+        Assemble dense YAML/Markdown system prompt using lightweight Question Anchor Indexes for Tier 1 & Tier 2,
         and dynamically detected Tier 3 entity QA pairs.
         """
         matched_t3 = self.detect_entities(user_input)
@@ -128,18 +145,18 @@ class MemoryEngine:
             "You are a Senior Friend & Coach to the user (Vitalik).",
             "Operate with directness, technical honesty, and pragmatic feedback. Respect the user's time and values.\n",
             "---",
-            "## TIER 1: CORE PROFILE (Always Loaded)"
+            "## TIER 1: CORE PROFILE QUESTION ANCHORS INDEX"
         ]
 
-        # Format Tier 1 QA
-        t1_yaml_data = [{"question": qa.question, "answer": qa.answer} for qa in self.tier1_items]
+        # Format Tier 1 QA Anchor Index (omitting full answers to maximize token efficiency)
+        t1_yaml_data = [{"id": qa.id, "question": qa.question} for qa in self.tier1_items]
         prompt_lines.append("```yaml")
         prompt_lines.append(yaml.dump(t1_yaml_data, sort_keys=False, allow_unicode=True).strip())
         prompt_lines.append("```\n")
 
-        # Format Tier 2 QA
-        prompt_lines.append("## TIER 2: DYNAMIC STATE & SPRINT GOALS (Always Loaded)")
-        t2_yaml_data = [{"id": qa.id, "question": qa.question, "answer": qa.answer, "weight": qa.weight} for qa in self.tier2_items]
+        # Format Tier 2 QA Anchor Index (omitting full answers to maximize token efficiency)
+        prompt_lines.append("## TIER 2: DYNAMIC STATE QUESTION ANCHORS INDEX")
+        t2_yaml_data = [{"id": qa.id, "question": qa.question, "weight": qa.weight} for qa in self.tier2_items]
         prompt_lines.append("```yaml")
         prompt_lines.append(yaml.dump(t2_yaml_data, sort_keys=False, allow_unicode=True).strip())
         prompt_lines.append("```\n")
@@ -166,7 +183,7 @@ class MemoryEngine:
             "4. You have an automated ProactiveEngine that sends messages to the user at 21:00 (Evening Sync), 09:00 (Morning Briefing), and event follow-up pings. Do NOT tell the user you cannot text them proactively or first.",
             "5. ENTITY BOUNDARY ISOLATION: Treat every named entity (projects, products, tools, subjects) as a strictly isolated namespace. NEVER assume relationships, shared architecture, or codebases between two entities unless explicitly confirmed in memory.",
             "6. UNCERTAINTY-DRIVEN SEARCH GATE: When the user queries any named entity or specific proper noun, evaluate if current context contains the FULL definition. If context is missing or partial, calling search_memory(query) is MANDATORY before replying. Never state an entity is unknown without searching Tier 3 first.",
-            "7. DEFAULT PROACTIVE TIER 3 SEARCH PROTOCOL: T1 and T2 contain ONLY short-term operational state and basic profile. For ALMOST ALL non-trivial queries (questions about projects, identity, past decisions, strategy, technical concepts, or open-ended inquiries), relying solely on T1/T2 is EXPLICITLY FORBIDDEN. Calling search_memory(query) on Step 1 is MANDATORY for all non-trivial turns. The ONLY exceptions are trivial greetings ('привет', 'как дела') or direct task commands ('заверши задачу 5'). Follow the 3-step memory protocol: search_memory -> get_document_outline -> read_document_section."
+            "7. 100% INDEX-BASED MEMORY PROTOCOL: T1 and T2 contain ONLY Question Anchor Indexes. If you need the exact factual answer for any T1 core profile item or T2 dynamic state item, calling read_memory_item(item_id) is MANDATORY to retrieve the answer. For deep Tier 3 entity/project memory, follow the 3-step memory protocol: search_memory -> get_document_outline -> read_document_section."
         ])
 
         system_prompt = "\n".join(prompt_lines)
