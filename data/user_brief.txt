@@ -1,26 +1,35 @@
-=== VITALIK USER PROFILE & CORE IDENTITY ===
-Name: Vitalik (Hitori)
-Core Identity: Pragmatic, systems-driven software architect with a vision for personal AI agents, transhumanism, and life optimization.
-Values: High speed of execution, clean software architecture, conciseness, personal freedom, health, and authentic human connection.
+=== 🚀 PROJECTS TRIO & PINNACLE GOAL ===
+CRITICAL RULE: These 3 projects are strictly INDEPENDENT entities. Do NOT mix their architectures or purpose.
 
-=== PROJECT 1: LifeOS ===
-Description: Personal AI memory and coaching agent powered by a 3-tier question-anchored memory architecture (Tier 1: Core Values & Identity, Tier 2: Active State & Rules, Tier 3: Entity Index).
-Tech Stack: Python, PostgreSQL (pgvector + FTS tsvector), AsyncIOScheduler, OpenAI Function Calling, Telegram bot (aiogram 3).
-Status: Active primary focus. Building production-ready MVP.
+PROJECT 1: Conex
 
-=== PROJECT 2: WeGeny ===
-Description: Commercial AI & backend service platform.
-Tech Stack: Python, FastAPI, PostgreSQL, API Gateway.
-Status: Commercial asset with deployed API Gateway. Treated as a separate commercial project, NOT part of LifeOS.
+Description: Personal AI mentor, coach, and life manager powered by long-term vector memory (RAG), diagnostic profiling, and level-based atomic task management.
+Tech Stack: Python (FastAPI / Asyncio), PostgreSQL (pgvector), Vector Embeddings, MCP, AI Agents.
+Status: Primary personal product & memory core.
+PROJECT 2: WeGeny (WeGeny.ru)
 
-=== PROJECT 3: Intelligence Bit ===
-Description: Autonomous daily tech news summary channel and media project.
-Status: Active media/experimental project. Operated as a distinct media entity, NOT part of WeGeny or LifeOS.
+Description: Psychotype matchmaking & meaningful conversation platform. Connects people based on deep psychological compatibility and semantic analysis of dialogue. [НЕ абстрактная коммерческая API-платформа!]
+Tech Stack: Python, Async Backend, DB Psychotype Engines, Semantic Matching Algorithms.
+Status: Core social/dating product asset.
+PROJECT 3: Intelligence Bit
 
-=== HEALTH & DAILY SYSTEMS ===
-Daily Rules:
-1. Project Step: Complete at least 1 concrete technical action daily.
-2. Cleaning: Clean 4 designated zones in the apartment.
-3. Walk & Think: Spend 1 hour outdoors walking and thinking without distraction.
-4. Career Action: Submit at least 1 job application or follow-up daily.
-Medical Routine: Attending day hospital (Дневной стационар) for regular recovery and therapy.
+Description: R&D Symbolic AI project. Focuses on inductive algorithm synthesis from data patterns and discovering the universal "unit of intelligence". [НЕ новостной телеграм-канал!]
+Tech Stack: Python, Pattern Synthesis Engines, Symbolic Reasoning.
+Status: Core R&D research project.
+PINNACLE CAREER GOAL: Participation in creating safe AGI (Artificial General Intelligence) without self-awareness.
+
+=== 🏥 HEALTH, DAILY SYSTEMS & HABITS ===
+Medical Routine: Attending Day Hospital (Дневной стационар) for regular recovery and therapy (Aripiprazole adjustment / akathisia management).
+Work Protocol (20/10 Sprints): 20 minutes of hyper-focused work ➔ 10 minutes of walking/stretching to manage posture and focus.
+Daily Systems & Rules:
+Walk & Think: 1 hour outdoors walking and thinking without distraction.
+Cleaning: Clean 4 designated zones in the apartment.
+Technical Action: Complete at least 1 concrete technical action daily.
+Career Action: Submit at least 1 job application or follow-up daily.
+=== 🌉 STRATEGIC BRIDGE & CAREER ===
+Tactical Bridge Strategy: Employment as Backend / ML Python Developer (Primary target: Sber AI Intern / Engineer, hybrid Moscow, 75k–100k+ RUB).
+Bridge Purpose: Employment is ONLY a temporary bootstrap tool to earn capital for dental care (mother & self), household stabilization, and safe medication transition. It is NOT a long-term career goal.
+Ultimate Goal: 100% financial freedom through Startups + YouTube ("Virtual Friend") + Pop/Rap Music.
+=== 🤖 EXPECTED AI MANAGER PERSONA ===
+Vibe: Senior Architect, personal mentor, systems coach, wise older friend.
+Rules of Engagement: Absolute honesty, direct criticism without censorship, zero empty validation, translating chaos into Level-based atomic task lists (strictly 15–30 min tasks) with measurable checkpoints.
