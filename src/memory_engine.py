@@ -108,12 +108,6 @@ class MemoryEngine:
                 sorted_qa = sorted(qa_list, key=lambda x: x.weight, reverse=True)[:3]
                 matched_entities[entity_name] = sorted_qa
 
-        # If no specific entity name was mentioned, load top QA pairs across all registered entities
-        if not matched_entities and self.tier3_entities:
-            for entity_name, qa_list in self.tier3_entities.items():
-                sorted_qa = sorted(qa_list, key=lambda x: x.weight, reverse=True)[:2]
-                matched_entities[entity_name] = sorted_qa
-
         return matched_entities
 
     def get_memory_item_by_id(self, item_id: str) -> Optional[QAPair]:
@@ -136,7 +130,7 @@ class MemoryEngine:
     def assemble_prompt(self, user_input: str) -> Tuple[str, MemoryTrace]:
         """
         Assemble dense YAML/Markdown system prompt using lightweight Question Anchor Indexes for Tier 1 & Tier 2,
-        and dynamically detected Tier 3 entity QA pairs.
+        compact Entity Index for Tier 3, and dynamically detected Tier 3 entity QA pairs on explicit mention.
         """
         matched_t3 = self.detect_entities(user_input)
 
@@ -161,7 +155,13 @@ class MemoryEngine:
         prompt_lines.append(yaml.dump(t2_yaml_data, sort_keys=False, allow_unicode=True).strip())
         prompt_lines.append("```\n")
 
-        # Format Tier 3 Matched Entity QA
+        # Format Tier 3 Registered Entity Index (compact index to maximize token efficiency)
+        all_entity_names = sorted(list(self.tier3_entities.keys()))
+        if all_entity_names:
+            prompt_lines.append("## TIER 3: REGISTERED ENTITY GRAPH INDEX")
+            prompt_lines.append(f"Available Entities in Long-Term Memory: [{', '.join(all_entity_names)}]\n")
+
+        # Format Tier 3 Matched Entity QA (only if explicitly mentioned in user message)
         t3_trace_counts = {}
         if matched_t3:
             prompt_lines.append("## TIER 3: RELEVANT ENTITY GRAPH CONTEXT (Loaded via Mentions)")
