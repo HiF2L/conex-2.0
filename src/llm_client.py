@@ -347,6 +347,10 @@ class LLMClient:
                                 curr = trace.t3_entities_loaded.get("retrieved_via_tools", 0)
                                 trace.t3_entities_loaded["retrieved_via_tools"] = curr + max(1, c)
 
+                                hits = re.findall(r"Entity:\s*([A-Za-z0-9_]+)", search_results)
+                                hits_str = ", ".join(list(dict.fromkeys(hits))[:5]) if hits else "0 hits"
+                                trace.debug_steps.append(f"• 🔍 `search_memory(\"{query}\")` -> Hits: [{hits_str}]")
+
                             messages.append({
                                 "role": "tool",
                                 "tool_call_id": tool_call.id,
@@ -368,6 +372,10 @@ class LLMClient:
                                 curr = trace.t3_entities_loaded.get("retrieved_via_tools", 0)
                                 trace.t3_entities_loaded["retrieved_via_tools"] = curr + max(1, c)
 
+                                headers = re.findall(r"-\s*\[Section ID:\s*[^\]]+\]\s*Topic:\s*([^\n]+)", outline_res)
+                                headers_str = ", ".join([f"'{h.strip()}'" for h in headers[:4]]) if headers else "0 headers"
+                                trace.debug_steps.append(f"• 📋 `get_document_outline(\"{identifier}\")` -> Headers: [{headers_str}]")
+
                             messages.append({"role": "tool", "tool_call_id": tool_call.id, "content": outline_res})
 
                         elif fn_name == "read_document_section":
@@ -384,6 +392,10 @@ class LLMClient:
                             if trace and hasattr(trace, "t3_entities_loaded"):
                                 curr = trace.t3_entities_loaded.get("retrieved_via_tools", 0)
                                 trace.t3_entities_loaded["retrieved_via_tools"] = curr + 1
+
+                                q_match = re.search(r"Question:\s*([^\n]+)", sec_res)
+                                topic = q_match.group(1).strip() if q_match else section_id
+                                trace.debug_steps.append(f"• 📖 `read_document_section(\"{identifier}\", \"{section_id}\")` -> Section: '{topic}' ({len(sec_res)} chars)")
 
                             messages.append({"role": "tool", "tool_call_id": tool_call.id, "content": sec_res})
 
@@ -403,6 +415,10 @@ class LLMClient:
                                 curr = trace.t3_entities_loaded.get("retrieved_via_tools", 0)
                                 trace.t3_entities_loaded["retrieved_via_tools"] = curr + max(1, c)
 
+                                matches = re.findall(r"Question:\s*([^\n]+)", doc_search_res)
+                                matches_str = ", ".join([f"'{m.strip()}'" for m in matches[:3]]) if matches else "0 matches"
+                                trace.debug_steps.append(f"• 🔎 `search_in_document(\"{identifier}\", \"{sub_query}\")` -> Snippets: [{matches_str}]")
+
                             messages.append({"role": "tool", "tool_call_id": tool_call.id, "content": doc_search_res})
 
                         elif fn_name == "read_memory_entry":
@@ -419,6 +435,8 @@ class LLMClient:
                                 c = len(re.findall(r"Section ID", entry_res))
                                 curr = trace.t3_entities_loaded.get("retrieved_via_tools", 0)
                                 trace.t3_entities_loaded["retrieved_via_tools"] = curr + max(1, c)
+
+                                trace.debug_steps.append(f"• 📑 `read_memory_entry(\"{identifier}\")` -> Full document ({len(entry_res)} chars)")
 
                             messages.append({"role": "tool", "tool_call_id": tool_call.id, "content": entry_res})
 

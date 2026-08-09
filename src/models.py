@@ -51,6 +51,7 @@ class MemoryTrace(BaseModel):
     t2_count: int = 0
     t3_entities_loaded: Dict[str, int] = Field(default_factory=dict)
     estimated_tokens: int = 0
+    debug_steps: List[str] = Field(default_factory=list, description="Step-by-step tool execution logs for /debug mode")
 
     @property
     def t3_total(self) -> int:

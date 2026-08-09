@@ -105,6 +105,8 @@ async def send_safe_reply(message: Message, text: str, parse_mode: str = "Markdo
             except Exception:
                 pass
 
+user_debug_mode: Dict[int, bool] = {}
+
 def register_handlers(router: Router, memory_engine: MemoryEngine, llm_client: LLMClient, extractor_service: ExtractorService):
     
     # 1. Command /start & /help
@@ -118,12 +120,33 @@ def register_handlers(router: Router, memory_engine: MemoryEngine, llm_client: L
             "• `/dump` - Start a **Multi-Message Dump Session** (or `/dump <text>` for immediate inline dump)\n"
             "• `/done` or `/stop` - Commit and process an active dump session\n"
             "• `/decay` - Manually apply exponential weight decay (`W_new = W_old * 0.95`) to Tier 2 items\n"
+            "• `/debug` - Toggle **Real-Time Debug Mode** (shows search queries, candidate hits, section headers & reads)\n"
             "• `/help` - Show this list of all available commands\n"
             "• `/start` - Show welcome message and guide\n"
             "• `/exit` or `/quit` - Display bot background service status and scheduled tasks\n\n"
             "💡 *Tip: Your coach maintains sliding conversation history (last 8 turns) and automatically searches deep long-term memory when needed!*"
         )
         await send_safe_reply(message, help_text)
+
+    # Command /debug
+    @router.message(Command("debug"))
+    async def cmd_debug(message: Message):
+        user_id = message.from_user.id if message.from_user else 0
+        curr = user_debug_mode.get(user_id, False)
+        new_state = not curr
+        user_debug_mode[user_id] = new_state
+
+        if new_state:
+            status_msg = (
+                "🛠️ **Debug Mode ENABLED!**\n\n"
+                "You will now see real-time tool execution logs, search queries, candidate hits, section headers, and section reads in every reply."
+            )
+        else:
+            status_msg = (
+                "🛠️ **Debug Mode DISABLED!**\n\n"
+                "Tool execution logs hidden."
+            )
+        await send_safe_reply(message, status_msg)
 
     # 2. Command /memory
     @router.message(Command("memory"))
@@ -300,9 +323,14 @@ def register_handlers(router: Router, memory_engine: MemoryEngine, llm_client: L
         save_chat_message(user_id, "user", f"[Voice Note]: {transcription}")
         save_chat_message(user_id, "assistant", response)
 
-        # 5. Append status trace footer
+        # 5. Append status trace footer & debug log if enabled
         trace_str = f"🧠 [Memory Trace: T1: {trace.t1_count} Qs | T2: {trace.t2_count} Qs | T3: {trace.t3_total} Qs | ~{trace.estimated_tokens} tokens]"
-        full_reply = f"🎙️ _[Распознано]: \"{transcription}\"_\n\n{response}\n\n_{trace_str}_"
+        debug_block = ""
+        if user_debug_mode.get(user_id, False) and trace.debug_steps:
+            steps_text = "\n".join(trace.debug_steps)
+            debug_block = f"\n\n🛠️ **DEBUG TOOL EXECUTION LOG:**\n{steps_text}\n"
+
+        full_reply = f"🎙️ _[Распознано]: \"{transcription}\"_\n\n{response}{debug_block}\n\n_{trace_str}_"
 
         # 6. Delete temporary status and send full coaching reply
         try:
@@ -345,9 +373,14 @@ def register_handlers(router: Router, memory_engine: MemoryEngine, llm_client: L
         save_chat_message(user_id, "user", user_text)
         save_chat_message(user_id, "assistant", response)
 
-        # 5. Append status trace footer
+        # 5. Append status trace footer & debug log if enabled
         trace_str = f"🧠 [Memory Trace: T1: {trace.t1_count} Qs | T2: {trace.t2_count} Qs | T3: {trace.t3_total} Qs | ~{trace.estimated_tokens} tokens]"
-        full_reply = f"{response}\n\n_{trace_str}_"
+        debug_block = ""
+        if user_debug_mode.get(user_id, False) and trace.debug_steps:
+            steps_text = "\n".join(trace.debug_steps)
+            debug_block = f"\n\n🛠️ **DEBUG TOOL EXECUTION LOG:**\n{steps_text}\n"
+
+        full_reply = f"{response}{debug_block}\n\n_{trace_str}_"
 
         # 6. Send safe message to user
         await send_safe_reply(message, full_reply)
