@@ -11,7 +11,7 @@ import json
 import logging
 import datetime
 from pathlib import Path
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Tuple
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -1122,6 +1122,20 @@ def get_active_tasks_db(
                         continue
                 res.append(t)
     return res[:limit] if limit else res
+
+def get_top_focus_tasks_db(limit: int = 3) -> Tuple[List[Dict[str, Any]], int]:
+    """
+    Retrieve top N highest priority / overdue active tasks, alongside total active task count.
+    Returns (top_tasks_list, total_active_count).
+    """
+    all_active = get_active_tasks_db(status="todo")
+    total_count = len(all_active)
+    
+    # Sort by priority ASC (P1 high, P2 medium, P3 low)
+    sorted_tasks = sorted(all_active, key=lambda t: (t.get("priority", 2), t.get("id", 0)))
+    top_tasks = sorted_tasks[:limit]
+    
+    return top_tasks, total_count
 
 def complete_task_db(identifier: str) -> bool:
     """Complete a task by ID (integer) or title match."""

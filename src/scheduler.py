@@ -31,16 +31,35 @@ async def send_morning_briefing(bot: Bot, target_user_id: int, memory_engine: Me
     
     # 1. Apply daily decay at start of day
     memory_engine.apply_decay()
-    
-    # 2. Assemble morning context
-    prompt, trace = memory_engine.assemble_prompt("Утренний брифинг и план задач спринта на сегодня.")
-    briefing_query = (
-        "Сформируй лаконичный, мощный утренний брифинг (Morning Briefing) на сегодня на русском языке.\n"
-        "Включи 3 ключевых пункта фокуса, опираясь на активные спринт-цели из памяти Tier 2. Отвечай строго на русском языке без лишних фраз."
+
+    # 2. Fetch sliding chat history (last 8 turns) to detect user silence & adapt tone
+    from src.db import get_recent_chat_history, get_top_focus_tasks_db
+    chat_history = get_recent_chat_history(target_user_id, limit=8)
+
+    # 3. Fetch top-3 focus tasks
+    top_tasks, total_tasks = get_top_focus_tasks_db(limit=3)
+    if top_tasks:
+        items = [f"- [P{t.get('priority', 2)}] {t['title']}" for t in top_tasks]
+        remaining = max(0, total_tasks - len(top_tasks))
+        queue_str = f"\n  (и еще {remaining} задач в очереди — отправь /tasks)" if remaining > 0 else ""
+        task_context = "ТОП-3 КЛЮЧЕВЫЕ ЗАДАЧИ ИЗ БАЗЫ:\n" + "\n".join(items) + queue_str
+    else:
+        task_context = "АКТИВНЫЕ ЗАДАЧИ: Все текущие задачи выполнены!"
+
+    # 4. Assemble morning prompt & trace
+    prompt, trace = memory_engine.assemble_prompt("Morning briefing & sprint focus.")
+    full_prompt = f"{prompt}\n\n{task_context}"
+
+    user_trigger = "Доброе утро! Проведи утренний брифинг на сегодня."
+    response = llm_client.generate_coaching_response(
+        full_prompt, 
+        user_trigger, 
+        chat_history=chat_history, 
+        memory_engine=memory_engine, 
+        trace=trace
     )
-    response = llm_client.generate_coaching_response(prompt, briefing_query)
     
-    full_message = f"🌅 **Morning Briefing (09:00)**\n\n{response}\n\n_🧠 [Memory Trace: T1: {trace.t1_count} Qs | T2: {trace.t2_count} Qs | T3: {trace.t3_total} Qs | ~{trace.estimated_tokens} tokens]_"
+    full_message = f"🌅 **Morning Briefing (09:00)**\n\n{response}\n\n_🧠 [Memory Trace: T1: {trace.t1_count} Qs | T2: {trace.t2_count} Qs | T3: {trace.t3_sections_read} Secs | ~{trace.estimated_tokens} tokens]_"
 
     await send_safe_bot_message(bot, target_user_id, full_message, parse_mode="Markdown")
 
@@ -49,35 +68,40 @@ async def send_evening_reflection(bot: Bot, target_user_id: int, memory_engine: 
     if not target_user_id:
         return
     
-    # 1. Fetch active tasks for TODAY (max 10 items) directly from PostgreSQL / Task Engine
-    from src.db import get_active_tasks_db
-    active_tasks = get_active_tasks_db(today_only=True, limit=10)
-    if active_tasks:
-        task_items = [f"- [{t.get('project_name') or 'Общий'}] (ID: {t['id']}) {t['title']}" for t in active_tasks]
-        tasks_block = "АКТИВНЫЕ ЗАДАЧИ НА СЕГОДНЯ ИЗ БАЗЫ ДАННЫХ:\n" + "\n".join(task_items)
+    # 1. Fetch sliding chat history (last 8 turns) to detect user silence & adapt tone
+    from src.db import get_recent_chat_history, get_top_focus_tasks_db
+    chat_history = get_recent_chat_history(target_user_id, limit=8)
+
+    # 2. Fetch top-3 focus tasks for today
+    top_tasks, total_tasks = get_top_focus_tasks_db(limit=3)
+    if top_tasks:
+        items = [f"- [P{t.get('priority', 2)}] {t['title']}" for t in top_tasks]
+        remaining = max(0, total_tasks - len(top_tasks))
+        queue_str = f"\n  (и еще {remaining} задач в очереди — отправь /tasks)" if remaining > 0 else ""
+        tasks_block = "ФОКУС-ЗАДАЧИ ДНЯ ИЗ БАЗЫ:\n" + "\n".join(items) + queue_str
     else:
-        tasks_block = "АКТИВНЫЕ ЗАДАЧИ НА СЕГОДНЯ ИЗ БАЗЫ ДАННЫХ: Нет невыполненных задач на сегодня."
+        tasks_block = "ФОКУС-ЗАДАЧИ ДНЯ: Нет незавершенных задач!"
 
-    # 2. Assemble current active sprint state from Tier 2
+    # 3. Assemble evening prompt & trace
     prompt, trace = memory_engine.assemble_prompt("Evening Sync task review and atomic planning for tomorrow.")
-    prompt = f"{prompt}\n\n{tasks_block}"
+    full_prompt = f"{prompt}\n\n{tasks_block}"
 
-    sync_query = (
-        "Сформируй ЕДИНОЕ вечернее сообщение 21:00 Evening Sync строго на русском языке:\n"
-        "1. Проверь и задай вопросы по 4 ежедневным правилам системности (Проектный шаг, Уборка 4 зон, 1ч Прогулка/Мысли, Вакансия/Отклик).\n"
-        "2. Выведи полученный список невыполненных задач из базы данных.\n"
-        "3. Спроси пользователя, что из этого получилось закрыть сегодня, а что заблокировало и почему.\n"
-        "4. Попроси выбрать 1 атомарный микро-шаг (15–30 мин) на завтра для плавного входа в рабочий день."
-    )
+    user_trigger = "Добрый вечер! Проведи вечернюю синхронизацию и подведи итоги дня."
     
     try:
-        response = llm_client.generate_coaching_response(prompt, sync_query)
+        response = llm_client.generate_coaching_response(
+            full_prompt, 
+            user_trigger, 
+            chat_history=chat_history, 
+            memory_engine=memory_engine, 
+            trace=trace
+        )
     except Exception as e:
         logger.warning(f"LLM call for Evening Sync failed: {e}. Using fallback format.")
         response = (
             "Подведем итоги сегодняшнего дня!\n\n"
             f"1. **Проверка 4 правил системности** (Проектный шаг, Уборка 4 зон, 1ч Прогулка/Мысли, Отклик/Работа) — что удалось закрыть?\n"
-            f"2. **Текущие задачи**:\n{tasks_block}\n\n"
+            f"2. **Фокус-задачи**:\n{tasks_block}\n\n"
             "3. Что сегодня получилось идеально, а что заблокировало?\n"
             "4. Выбери **1 атомарный микро-шаг (15–30 мин)** на завтра!"
         )
@@ -85,7 +109,7 @@ async def send_evening_reflection(bot: Bot, target_user_id: int, memory_engine: 
     full_message = (
         f"🌆 **Evening Sync (21:00)**\n\n"
         f"{response}\n\n"
-        f"_🧠 [Memory Trace: T1: {trace.t1_count} Qs | T2: {trace.t2_count} Qs | T3: {trace.t3_total} Qs | ~{trace.estimated_tokens} tokens]_"
+        f"_🧠 [Memory Trace: T1: {trace.t1_count} Qs | T2: {trace.t2_count} Qs | T3: {trace.t3_sections_read} Secs | ~{trace.estimated_tokens} tokens]_"
     )
 
     await send_safe_bot_message(bot, target_user_id, full_message, parse_mode="Markdown")

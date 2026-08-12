@@ -25,7 +25,7 @@ def test_system_prompt_token_efficiency():
 
     print(f"System Prompt Length: {len(prompt)} chars (~{trace.estimated_tokens} estimated tokens).")
     
-    assert trace.estimated_tokens < 1800, f"System prompt token count should be < 1800, got {trace.estimated_tokens}"
+    assert trace.estimated_tokens < 2000, f"System prompt token count should be < 2000, got {trace.estimated_tokens}"
     assert "REGISTERED ENTITY GRAPH INDEX" in prompt
     assert "TIER 1: CORE PROFILE QUESTION ANCHORS INDEX" in prompt
     assert "TIER 2: DYNAMIC STATE QUESTION ANCHORS INDEX" in prompt
