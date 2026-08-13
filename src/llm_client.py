@@ -333,11 +333,59 @@ class LLMClient:
             }
         }
 
+        create_experiment_tool = {
+            "type": "function",
+            "function": {
+                "name": "create_experiment",
+                "description": "Spin up a new structured Sprint or A/B Test experiment (e.g. habit tracking, Keto vs Mediterranean).",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "title": {"type": "string", "description": "Title of the sprint or A/B experiment"},
+                        "type": {"type": "string", "description": "Type of experiment: 'SPRINT' or 'AB_TEST'"},
+                        "hypothesis_a": {"type": "string", "description": "Primary hypothesis or Phase A protocol"},
+                        "hypothesis_b": {"type": "string", "description": "Phase B protocol for A/B tests"},
+                        "duration_days": {"type": "integer", "description": "Duration in days (default: 14)"},
+                        "daily_actions": {"type": "array", "items": {"type": "string"}, "description": "List of concrete daily action items"}
+                    },
+                    "required": ["title", "type", "hypothesis_a"]
+                }
+            }
+        }
+
+        get_active_experiments_tool = {
+            "type": "function",
+            "function": {
+                "name": "get_active_experiments",
+                "description": "Fetch all currently active habit Sprints and A/B experiments.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {}
+                }
+            }
+        }
+
+        advance_experiment_phase_tool = {
+            "type": "function",
+            "function": {
+                "name": "advance_experiment_phase",
+                "description": "Advance an experiment to its next phase (e.g., PHASE_A -> PHASE_B -> COMPLETED).",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "experiment_id": {"type": "integer", "description": "The experiment ID integer"}
+                    },
+                    "required": ["experiment_id"]
+                }
+            }
+        }
+
         tools = [
             search_tool, forget_tool, create_project_tool, create_task_tool, 
             complete_task_tool, list_tasks_tool, delete_task_tool, update_task_tool,
             get_document_outline_tool, read_document_section_tool, search_in_document_tool, read_memory_entry_tool,
-            read_memory_item_tool, log_wellbeing_event_tool, get_recovery_protocol_tool
+            read_memory_item_tool, log_wellbeing_event_tool, get_recovery_protocol_tool,
+            create_experiment_tool, get_active_experiments_tool, advance_experiment_phase_tool
         ]
 
         if self.is_api_configured():
@@ -532,6 +580,56 @@ class LLMClient:
                                 trace.debug_steps.append(f"• 🚨 `get_recovery_protocol(\"{current_state}\")` -> Issued Recovery Protocol Checklist ({len(protocol_res)} chars)")
 
                             messages.append({"role": "tool", "tool_call_id": tool_call.id, "content": protocol_res})
+
+                        elif fn_name == "create_experiment":
+                            from src.db import create_experiment_db
+                            try:
+                                args = json.loads(tool_call.function.arguments)
+                                title = args.get("title", "")
+                                exp_type = args.get("type", "SPRINT")
+                                hyp_a = args.get("hypothesis_a", "")
+                                hyp_b = args.get("hypothesis_b", "")
+                                duration = args.get("duration_days", 14)
+                                actions = args.get("daily_actions", [])
+                            except Exception:
+                                title, exp_type, hyp_a, hyp_b, duration, actions = "", "SPRINT", "", "", 14, []
+
+                            logger.info(f"LLM triggered tool create_experiment(title='{title}', type='{exp_type}')")
+                            exp_res = create_experiment_db(title, exp_type, hyp_a, hyp_b, duration, actions)
+                            res_str = json.dumps(exp_res, ensure_ascii=False)
+
+                            if trace and hasattr(trace, "debug_steps"):
+                                trace.debug_steps.append(f"• 🔬 `create_experiment(\"{title}\")` -> Created {exp_type} ID #{exp_res.get('id')}")
+
+                            messages.append({"role": "tool", "tool_call_id": tool_call.id, "content": res_str})
+
+                        elif fn_name == "get_active_experiments":
+                            from src.db import get_active_experiments_db
+                            logger.info("LLM triggered tool get_active_experiments()")
+                            active_exp = get_active_experiments_db()
+                            res_str = json.dumps(active_exp, ensure_ascii=False)
+
+                            if trace and hasattr(trace, "debug_steps"):
+                                trace.debug_steps.append(f"• 🧪 `get_active_experiments()` -> Active items: {len(active_exp)}")
+
+                            messages.append({"role": "tool", "tool_call_id": tool_call.id, "content": res_str})
+
+                        elif fn_name == "advance_experiment_phase":
+                            from src.db import advance_experiment_phase_db
+                            try:
+                                args = json.loads(tool_call.function.arguments)
+                                exp_id = int(args.get("experiment_id", 0))
+                            except Exception:
+                                exp_id = 0
+
+                            logger.info(f"LLM triggered tool advance_experiment_phase(experiment_id={exp_id})")
+                            adv_res = advance_experiment_phase_db(exp_id)
+                            res_str = json.dumps(adv_res, ensure_ascii=False)
+
+                            if trace and hasattr(trace, "debug_steps"):
+                                trace.debug_steps.append(f"• ⏩ `advance_experiment_phase({exp_id})` -> New Phase: {adv_res.get('phase')}")
+
+                            messages.append({"role": "tool", "tool_call_id": tool_call.id, "content": res_str})
 
                         elif fn_name == "forget_memory" and memory_engine:
                             try:

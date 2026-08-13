@@ -926,10 +926,201 @@ def delete_tier3_memory_by_keyword(keyword: str) -> int:
     finally:
         conn.close()
 
-# In-memory fallback storage for projects, tasks, and wellbeing logs
+# In-memory fallback storage for projects, tasks, wellbeing logs, and experiments
 _in_memory_projects: List[Dict[str, Any]] = []
 _in_memory_tasks: List[Dict[str, Any]] = []
 _in_memory_wellbeing_logs: List[Dict[str, Any]] = []
+_in_memory_experiments: List[Dict[str, Any]] = []
+
+def create_experiment_db(
+    title: str,
+    type: str,
+    hypothesis_a: str,
+    hypothesis_b: Optional[str] = None,
+    duration_days: int = 14,
+    daily_actions: Optional[List[str]] = None,
+    user_id: Optional[int] = None
+) -> Dict[str, Any]:
+    """
+    Create a new Sprint or A/B Test experiment in PostgreSQL with in-memory fallback.
+    """
+    clean_title = title.strip()
+    clean_type = (type or "SPRINT").strip().upper()
+    if clean_type not in ("SPRINT", "AB_TEST"):
+        clean_type = "SPRINT"
+
+    actions_list = daily_actions if isinstance(daily_actions, list) else []
+    uid = user_id or 1
+    today_date = datetime.date.today()
+    end_date = today_date + datetime.timedelta(days=int(duration_days))
+
+    conn = _get_connection()
+    if conn:
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO sprints_and_experiments 
+                    (user_id, title, type, phase, duration_days, start_date, end_date, hypothesis_a, hypothesis_b, daily_actions, status)
+                    VALUES (%s, %s, %s, 'PHASE_A', %s, %s, %s, %s, %s, %s, 'active')
+                    RETURNING id, user_id, title, type, phase, duration_days, start_date, end_date, hypothesis_a, hypothesis_b, daily_actions, status, created_at;
+                """, (uid, clean_title, clean_type, duration_days, today_date, end_date, hypothesis_a.strip(), (hypothesis_b or "").strip(), json.dumps(actions_list)))
+                row = cur.fetchone()
+                conn.commit()
+                if row:
+                    act = row[10] if isinstance(row[10], list) else (json.loads(row[10]) if isinstance(row[10], str) else actions_list)
+                    return {
+                        "id": row[0],
+                        "user_id": row[1],
+                        "title": row[2],
+                        "type": row[3],
+                        "phase": row[4],
+                        "duration_days": row[5],
+                        "start_date": str(row[6]),
+                        "end_date": str(row[7]),
+                        "hypothesis_a": row[8],
+                        "hypothesis_b": row[9],
+                        "daily_actions": act,
+                        "status": row[11],
+                        "created_at": str(row[12])
+                    }
+        except Exception as e:
+            logger.warning(f"Failed to insert experiment in PostgreSQL: {e}")
+        finally:
+            conn.close()
+
+    # In-memory fallback
+    exp_item = {
+        "id": len(_in_memory_experiments) + 1,
+        "user_id": uid,
+        "title": clean_title,
+        "type": clean_type,
+        "phase": "PHASE_A",
+        "duration_days": duration_days,
+        "start_date": today_date.isoformat(),
+        "end_date": end_date.isoformat(),
+        "hypothesis_a": hypothesis_a.strip(),
+        "hypothesis_b": (hypothesis_b or "").strip(),
+        "daily_actions": actions_list,
+        "status": "active",
+        "created_at": datetime.datetime.now().isoformat()
+    }
+    _in_memory_experiments.append(exp_item)
+    return exp_item
+
+def get_active_experiments_db(user_id: Optional[int] = None) -> List[Dict[str, Any]]:
+    """
+    Retrieve all active sprints and A/B tests.
+    """
+    conn = _get_connection()
+    if conn:
+        try:
+            with conn.cursor() as cur:
+                where_clauses = ["status = 'active'"]
+                params: List[Any] = []
+                if user_id:
+                    where_clauses.append("user_id = %s")
+                    params.append(user_id)
+
+                where_sql = "WHERE " + " AND ".join(where_clauses)
+                cur.execute(f"""
+                    SELECT id, user_id, title, type, phase, duration_days, start_date, end_date, hypothesis_a, hypothesis_b, daily_actions, status, created_at
+                    FROM sprints_and_experiments
+                    {where_sql}
+                    ORDER BY id DESC;
+                """, tuple(params))
+                rows = cur.fetchall()
+                if rows is not None:
+                    res = []
+                    for r in rows:
+                        act = r[10] if isinstance(r[10], list) else (json.loads(r[10]) if isinstance(r[10], str) and r[10] else [])
+                        res.append({
+                            "id": r[0],
+                            "user_id": r[1],
+                            "title": r[2],
+                            "type": r[3],
+                            "phase": r[4],
+                            "duration_days": r[5],
+                            "start_date": str(r[6]),
+                            "end_date": str(r[7]),
+                            "hypothesis_a": r[8],
+                            "hypothesis_b": r[9],
+                            "daily_actions": act,
+                            "status": r[11],
+                            "created_at": str(r[12])
+                        })
+                    return res
+        except Exception as e:
+            logger.warning(f"Failed to fetch active experiments from PostgreSQL: {e}")
+        finally:
+            conn.close()
+
+    # In-memory fallback
+    active_items = []
+    for exp in _in_memory_experiments:
+        if exp.get("status") == "active":
+            if not user_id or exp.get("user_id") == user_id:
+                active_items.append(exp)
+    return active_items
+
+def advance_experiment_phase_db(experiment_id: int) -> Dict[str, Any]:
+    """
+    Advance an experiment phase: PHASE_A -> PHASE_B -> COMPLETED.
+    """
+    conn = _get_connection()
+    if conn:
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT phase, type FROM sprints_and_experiments WHERE id = %s;", (experiment_id,))
+                row = cur.fetchone()
+                if row:
+                    curr_phase, exp_type = row[0], row[1]
+                    if curr_phase == "PHASE_A" and exp_type == "AB_TEST":
+                        new_phase = "PHASE_B"
+                        new_status = "active"
+                    else:
+                        new_phase = "COMPLETED"
+                        new_status = "completed"
+
+                    cur.execute("""
+                        UPDATE sprints_and_experiments 
+                        SET phase = %s, status = %s 
+                        WHERE id = %s
+                        RETURNING id, user_id, title, type, phase, duration_days, start_date, end_date, hypothesis_a, hypothesis_b, daily_actions, status, created_at;
+                    """, (new_phase, new_status, experiment_id))
+                    updated_row = cur.fetchone()
+                    conn.commit()
+                    if updated_row:
+                        act = updated_row[10] if isinstance(updated_row[10], list) else (json.loads(updated_row[10]) if isinstance(updated_row[10], str) else [])
+                        return {
+                            "id": updated_row[0],
+                            "user_id": updated_row[1],
+                            "title": updated_row[2],
+                            "type": updated_row[3],
+                            "phase": updated_row[4],
+                            "duration_days": updated_row[5],
+                            "start_date": str(updated_row[6]),
+                            "end_date": str(updated_row[7]),
+                            "hypothesis_a": updated_row[8],
+                            "hypothesis_b": updated_row[9],
+                            "daily_actions": act,
+                            "status": updated_row[11],
+                            "created_at": str(updated_row[12])
+                        }
+        except Exception as e:
+            logger.warning(f"Failed to advance experiment phase in PostgreSQL: {e}")
+        finally:
+            conn.close()
+
+    # In-memory fallback
+    for exp in _in_memory_experiments:
+        if exp["id"] == experiment_id:
+            if exp["phase"] == "PHASE_A" and exp["type"] == "AB_TEST":
+                exp["phase"] = "PHASE_B"
+            else:
+                exp["phase"] = "COMPLETED"
+                exp["status"] = "completed"
+            return exp
+    return {"error": f"Experiment ID #{experiment_id} not found."}
 
 def log_wellbeing_event_db(
     state_type: str,

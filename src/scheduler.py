@@ -33,7 +33,7 @@ async def send_morning_briefing(bot: Bot, target_user_id: int, memory_engine: Me
     memory_engine.apply_decay()
 
     # 2. Fetch sliding chat history (last 8 turns) to detect user silence & adapt tone
-    from src.db import get_recent_chat_history, get_top_focus_tasks_db
+    from src.db import get_recent_chat_history, get_top_focus_tasks_db, get_active_experiments_db
     chat_history = get_recent_chat_history(target_user_id, limit=8)
 
     # 3. Fetch top-3 focus tasks
@@ -46,11 +46,22 @@ async def send_morning_briefing(bot: Bot, target_user_id: int, memory_engine: Me
     else:
         task_context = "АКТИВНЫЕ ЗАДАЧИ: Все текущие задачи выполнены!"
 
-    # 4. Assemble morning prompt & trace
-    prompt, trace = memory_engine.assemble_prompt("Morning briefing & sprint focus.")
-    full_prompt = f"{prompt}\n\n{task_context}"
+    # 4. Fetch active sprints & A/B experiments
+    active_exps = get_active_experiments_db(user_id=target_user_id)
+    if active_exps:
+        exp_lines = []
+        for exp in active_exps:
+            actions_str = ", ".join(exp.get("daily_actions", [])) or "Стандартный протокол"
+            exp_lines.append(f"- [{exp.get('type')}] ID #{exp.get('id')} '{exp.get('title')}' (Phase: {exp.get('phase')}, Действия: {actions_str})")
+        exp_context = "АКТИВНЫЕ СПРИНТЫ И A/B ЭКСПЕРИМЕНТЫ:\n" + "\n".join(exp_lines)
+    else:
+        exp_context = "АКТИВНЫЕ СПРИНТЫ И A/B ЭКСПЕРИМЕНТЫ: Нет активных экспериментов."
 
-    user_trigger = "Доброе утро! Проведи утренний брифинг на сегодня."
+    # 5. Assemble morning prompt & trace
+    prompt, trace = memory_engine.assemble_prompt("Morning briefing, sprint schedule, and daily rules.")
+    full_prompt = f"{prompt}\n\n{task_context}\n\n{exp_context}"
+
+    user_trigger = "Доброе утро! Сформируй утренний брифинг и структурированный план на сегодня с учетом спринтов, задач и 4 правил системности."
     response = llm_client.generate_coaching_response(
         full_prompt, 
         user_trigger, 

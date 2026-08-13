@@ -153,6 +153,26 @@ def setup_database():
                 CREATE INDEX IF NOT EXISTS idx_wellbeing_user_state ON wellbeing_logs (user_id, state_type, created_at DESC);
             """)
 
+            # Create sprints_and_experiments table
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS sprints_and_experiments (
+                    id SERIAL PRIMARY KEY,
+                    user_id BIGINT,
+                    title VARCHAR(255) NOT NULL,
+                    type VARCHAR(50) NOT NULL,
+                    phase VARCHAR(50) DEFAULT 'PHASE_A',
+                    duration_days INT DEFAULT 14,
+                    start_date DATE DEFAULT CURRENT_DATE,
+                    end_date DATE,
+                    hypothesis_a TEXT,
+                    hypothesis_b TEXT,
+                    daily_actions JSONB NOT NULL,
+                    status VARCHAR(20) DEFAULT 'active',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE INDEX IF NOT EXISTS idx_experiments_user_status ON sprints_and_experiments (user_id, status, type);
+            """)
+
             # Create tier3_memory_index table
             if has_pgvector:
                 cur.execute("""
