@@ -300,11 +300,44 @@ class LLMClient:
             }
         }
 
+        log_wellbeing_event_tool = {
+            "type": "function",
+            "function": {
+                "name": "log_wellbeing_event",
+                "description": "Log physical, cognitive, or emotional state events (food, movement, medications, clarity, brain fog, anxiety).",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "state_type": {"type": "string", "description": "State category (e.g. 'PEAK_CLARITY', 'BRAIN_FOG', 'LOW_ENERGY', 'ANXIETY')"},
+                        "triggers": {"type": "array", "items": {"type": "string"}, "description": "List of triggers or catalysts (e.g. ['low_carb', 'brisk_walk', 'americano'])"},
+                        "symptoms": {"type": "array", "items": {"type": "string"}, "description": "List of observed physical/cognitive symptoms (e.g. ['fast_word_retrieval', 'sluggish_focus'])"},
+                        "notes": {"type": "string", "description": "Raw reflection or detailed input notes"}
+                    },
+                    "required": ["state_type"]
+                }
+            }
+        }
+
+        get_recovery_protocol_tool = {
+            "type": "function",
+            "function": {
+                "name": "get_recovery_protocol",
+                "description": "Fetch historical Recovery Protocol checklist based on user's documented peak-clarity triggers.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "current_state": {"type": "string", "description": "Current state (e.g. 'BRAIN_FOG', 'LOW_ENERGY', 'ANXIETY')"}
+                    },
+                    "required": ["current_state"]
+                }
+            }
+        }
+
         tools = [
             search_tool, forget_tool, create_project_tool, create_task_tool, 
             complete_task_tool, list_tasks_tool, delete_task_tool, update_task_tool,
             get_document_outline_tool, read_document_section_tool, search_in_document_tool, read_memory_entry_tool,
-            read_memory_item_tool
+            read_memory_item_tool, log_wellbeing_event_tool, get_recovery_protocol_tool
         ]
 
         if self.is_api_configured():
@@ -463,6 +496,42 @@ class LLMClient:
                                 trace.debug_steps.append(f"• 📌 `read_memory_item(\"{item_id}\")` -> File: `{src_file}` | Anchor: '{q_title}' ({len(item_res)} chars)")
 
                             messages.append({"role": "tool", "tool_call_id": tool_call.id, "content": item_res})
+
+                        elif fn_name == "log_wellbeing_event":
+                            from src.db import log_wellbeing_event_db
+                            try:
+                                args = json.loads(tool_call.function.arguments)
+                                state_type = args.get("state_type", "GENERAL")
+                                triggers = args.get("triggers", [])
+                                symptoms = args.get("symptoms", [])
+                                notes = args.get("notes", "")
+                            except Exception:
+                                state_type, triggers, symptoms, notes = "GENERAL", [], [], ""
+
+                            logger.info(f"LLM triggered tool log_wellbeing_event(state_type='{state_type}')")
+                            log_res = log_wellbeing_event_db(state_type, triggers, symptoms, notes)
+                            res_str = json.dumps(log_res, ensure_ascii=False)
+
+                            if trace and hasattr(trace, "debug_steps"):
+                                trace.debug_steps.append(f"• 🩺 `log_wellbeing_event(\"{state_type}\")` -> Recorded log ID #{log_res.get('id')}")
+
+                            messages.append({"role": "tool", "tool_call_id": tool_call.id, "content": res_str})
+
+                        elif fn_name == "get_recovery_protocol":
+                            from src.db import get_recovery_protocol_db
+                            try:
+                                args = json.loads(tool_call.function.arguments)
+                                current_state = args.get("current_state", "BRAIN_FOG")
+                            except Exception:
+                                current_state = "BRAIN_FOG"
+
+                            logger.info(f"LLM triggered tool get_recovery_protocol(current_state='{current_state}')")
+                            protocol_res = get_recovery_protocol_db(current_state)
+
+                            if trace and hasattr(trace, "debug_steps"):
+                                trace.debug_steps.append(f"• 🚨 `get_recovery_protocol(\"{current_state}\")` -> Issued Recovery Protocol Checklist ({len(protocol_res)} chars)")
+
+                            messages.append({"role": "tool", "tool_call_id": tool_call.id, "content": protocol_res})
 
                         elif fn_name == "forget_memory" and memory_engine:
                             try:

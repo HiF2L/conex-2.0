@@ -926,9 +926,214 @@ def delete_tier3_memory_by_keyword(keyword: str) -> int:
     finally:
         conn.close()
 
-# In-memory fallback storage for projects and tasks
+# In-memory fallback storage for projects, tasks, and wellbeing logs
 _in_memory_projects: List[Dict[str, Any]] = []
 _in_memory_tasks: List[Dict[str, Any]] = []
+_in_memory_wellbeing_logs: List[Dict[str, Any]] = []
+
+def log_wellbeing_event_db(
+    state_type: str,
+    triggers: Optional[List[str]] = None,
+    symptoms: Optional[List[str]] = None,
+    notes: str = "",
+    user_id: Optional[int] = None
+) -> Dict[str, Any]:
+    """
+    Log a physical/cognitive state event (e.g., PEAK_CLARITY, BRAIN_FOG, LOW_ENERGY, ANXIETY)
+    into PostgreSQL wellbeing_logs with in-memory fallback.
+    """
+    clean_state = (state_type or "GENERAL").strip().upper()
+    triggers_list = triggers if isinstance(triggers, list) else []
+    symptoms_list = symptoms if isinstance(symptoms, list) else []
+    uid = user_id or 1
+    today_iso = datetime.datetime.now().isoformat()
+
+    conn = _get_connection()
+    if conn:
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO wellbeing_logs (user_id, state_type, triggers, symptoms, notes)
+                    VALUES (%s, %s, %s, %s, %s)
+                    RETURNING id, user_id, state_type, triggers, symptoms, notes, created_at;
+                """, (uid, clean_state, json.dumps(triggers_list), json.dumps(symptoms_list), notes.strip()))
+                row = cur.fetchone()
+                conn.commit()
+                if row:
+                    tr = row[3] if isinstance(row[3], list) else (json.loads(row[3]) if isinstance(row[3], str) else triggers_list)
+                    sym = row[4] if isinstance(row[4], list) else (json.loads(row[4]) if isinstance(row[4], str) else symptoms_list)
+                    return {
+                        "id": row[0],
+                        "user_id": row[1],
+                        "state_type": row[2],
+                        "triggers": tr,
+                        "symptoms": sym,
+                        "notes": row[5],
+                        "created_at": str(row[6])
+                    }
+        except Exception as e:
+            logger.warning(f"Failed to insert wellbeing_log in PostgreSQL: {e}")
+        finally:
+            conn.close()
+
+    # In-memory fallback
+    log_item = {
+        "id": len(_in_memory_wellbeing_logs) + 1,
+        "user_id": uid,
+        "state_type": clean_state,
+        "triggers": triggers_list,
+        "symptoms": symptoms_list,
+        "notes": notes.strip(),
+        "created_at": today_iso
+    }
+    _in_memory_wellbeing_logs.append(log_item)
+    return log_item
+
+def get_wellbeing_history_db(
+    state_type: Optional[str] = None,
+    limit: int = 10,
+    user_id: Optional[int] = None
+) -> List[Dict[str, Any]]:
+    """
+    Retrieve historical wellbeing logs filtered optionally by state_type, ordered by created_at DESC.
+    """
+    clean_state = state_type.strip().upper() if state_type else None
+    conn = _get_connection()
+    if conn:
+        try:
+            with conn.cursor() as cur:
+                where_clauses = []
+                params: List[Any] = []
+                if user_id:
+                    where_clauses.append("user_id = %s")
+                    params.append(user_id)
+                if clean_state:
+                    where_clauses.append("state_type = %s")
+                    params.append(clean_state)
+
+                where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
+                cur.execute(f"""
+                    SELECT id, user_id, state_type, triggers, symptoms, notes, created_at
+                    FROM wellbeing_logs
+                    {where_sql}
+                    ORDER BY created_at DESC, id DESC
+                    LIMIT %s;
+                """, tuple(params + [limit]))
+                rows = cur.fetchall()
+                if rows is not None:
+                    res = []
+                    for r in rows:
+                        tr = r[3] if isinstance(r[3], list) else (json.loads(r[3]) if isinstance(r[3], str) and r[3] else [])
+                        sym = r[4] if isinstance(r[4], list) else (json.loads(r[4]) if isinstance(r[4], str) and r[4] else [])
+                        res.append({
+                            "id": r[0],
+                            "user_id": r[1],
+                            "state_type": r[2],
+                            "triggers": tr,
+                            "symptoms": sym,
+                            "notes": r[5],
+                            "created_at": str(r[6])
+                        })
+                    return res
+        except Exception as e:
+            logger.warning(f"Failed to fetch wellbeing history from PostgreSQL: {e}")
+        finally:
+            conn.close()
+
+    # In-memory fallback
+    filtered = []
+    for item in reversed(_in_memory_wellbeing_logs):
+        if user_id and item.get("user_id") != user_id:
+            continue
+        if clean_state and item.get("state_type") != clean_state:
+            continue
+        filtered.append(item)
+        if len(filtered) >= limit:
+            break
+    return filtered
+
+def generate_wellbeing_summary_db(user_id: Optional[int] = None) -> Dict[str, Any]:
+    """
+    Generate an aggregated summary of triggers and symptoms across states (e.g. PEAK_CLARITY vs BRAIN_FOG).
+    """
+    logs = get_wellbeing_history_db(limit=100, user_id=user_id)
+    state_counts: Dict[str, int] = {}
+    trigger_counts: Dict[str, Dict[str, int]] = {}
+    symptom_counts: Dict[str, Dict[str, int]] = {}
+
+    for log in logs:
+        st = log.get("state_type", "GENERAL")
+        state_counts[st] = state_counts.get(st, 0) + 1
+
+        if st not in trigger_counts:
+            trigger_counts[st] = {}
+        if st not in symptom_counts:
+            symptom_counts[st] = {}
+
+        for t in log.get("triggers", []):
+            if isinstance(t, str) and t.strip():
+                clean_t = t.strip().lower()
+                trigger_counts[st][clean_t] = trigger_counts[st].get(clean_t, 0) + 1
+
+        for s in log.get("symptoms", []):
+            if isinstance(s, str) and s.strip():
+                clean_s = s.strip().lower()
+                symptom_counts[st][clean_s] = symptom_counts[st].get(clean_s, 0) + 1
+
+    summary = {
+        "total_logs": len(logs),
+        "states_breakdown": state_counts,
+        "peak_clarity_top_triggers": sorted(trigger_counts.get("PEAK_CLARITY", {}).items(), key=lambda x: x[1], reverse=True),
+        "peak_clarity_top_symptoms": sorted(symptom_counts.get("PEAK_CLARITY", {}).items(), key=lambda x: x[1], reverse=True),
+        "brain_fog_top_triggers": sorted(trigger_counts.get("BRAIN_FOG", {}).items(), key=lambda x: x[1], reverse=True),
+        "brain_fog_top_symptoms": sorted(symptom_counts.get("BRAIN_FOG", {}).items(), key=lambda x: x[1], reverse=True)
+    }
+    return summary
+
+def get_recovery_protocol_db(current_state: str = "BRAIN_FOG", user_id: Optional[int] = None) -> str:
+    """
+    Generate a personalized, deterministic Recovery Protocol based on historical PEAK_CLARITY triggers.
+    """
+    summary = generate_wellbeing_summary_db(user_id=user_id)
+    peak_triggers = [t[0] for t in summary.get("peak_clarity_top_triggers", [])[:5]]
+    fog_triggers = [t[0] for t in summary.get("brain_fog_top_triggers", [])[:3]]
+
+    # Default fallback recovery actions if logs are sparse
+    default_peak_actions = [
+        "Low-carb reset (clean protein & healthy fats)",
+        "Brisk 20-30 min walk (locomotion)",
+        "Hydration & pure espresso / americano",
+        "Zero refined sugar & high focus workspace"
+    ]
+    
+    actions = []
+    if peak_triggers:
+        for pt in peak_triggers:
+            formatted = pt.replace("_", " ").title()
+            actions.append(f"• **{formatted}** (historically verified peak clarity catalyst)")
+    else:
+        for act in default_peak_actions:
+            actions.append(f"• **{act}**")
+
+    avoid_block = ""
+    if fog_triggers:
+        avoid_items = [f"`{ft}`" for ft in fog_triggers]
+        avoid_block = f"\n⚠️ **Avoid Known Triggers**: {', '.join(avoid_items)}\n"
+
+    protocol_md = (
+        f"🚨 **RECOVERY PROTOCOL: RESET TO PEAK CLARITY**\n\n"
+        f"Target State: Return from `{current_state.upper()}` to `PEAK_CLARITY`.\n\n"
+        f"📋 **Actionable Step-by-Step Recovery Checklist**:\n"
+        f"1. 💧 **Hydration & Electrolytes**: Drink 500ml pure water immediately.\n"
+        f"2. 🚶 **Locomotion / Physical Reset**: Take a brisk 20–30 min walk outdoors without screens.\n"
+        f"3. 🥗 **Nutritional Reset**: Eat clean protein/fats, strictly avoid refined carbs & sugar.\n"
+        f"4. ☕ **Tactical Caffeine**: Single americano/espresso after movement.\n\n"
+        f"🧠 **Proven Historical Catalysts for Vitalik**:\n"
+        + "\n".join(actions) + "\n"
+        + avoid_block +
+        f"\n🎯 *Focus on completing step 1 and step 2 right now before taking on heavy cognitive work.*"
+    )
+    return protocol_md
 
 def create_project_db(name: str, description: str = "") -> Dict[str, Any]:
     """Create a new project in PostgreSQL with in-memory fallback."""

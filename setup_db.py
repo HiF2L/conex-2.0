@@ -139,6 +139,20 @@ def setup_database():
                 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks (status, project_id);
             """)
 
+            # Create wellbeing_logs table
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS wellbeing_logs (
+                    id SERIAL PRIMARY KEY,
+                    user_id BIGINT,
+                    state_type VARCHAR(50) NOT NULL,
+                    triggers JSONB,
+                    symptoms JSONB,
+                    notes TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE INDEX IF NOT EXISTS idx_wellbeing_user_state ON wellbeing_logs (user_id, state_type, created_at DESC);
+            """)
+
             # Create tier3_memory_index table
             if has_pgvector:
                 cur.execute("""
