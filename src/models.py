@@ -71,3 +71,63 @@ class ChatTurn(BaseModel):
     user_message: str
     agent_response: str
     timestamp: Optional[str] = None
+
+
+class ProjectItem(BaseModel):
+    """
+    Project category model.
+    """
+    id: Optional[int] = None
+    name: str = Field(..., description="Unique project name")
+    description: Optional[str] = Field(default="", description="Project description or mission")
+    status: str = Field(default="active", description="Project status (active, archived)")
+    created_at: Optional[str] = None
+
+
+class TaskItem(BaseModel):
+    """
+    Task model for PostgreSQL Task Manager.
+    """
+    id: Optional[int] = None
+    project_id: Optional[int] = None
+    project_name: Optional[str] = None
+    title: str = Field(..., description="Task title or action item")
+    description: Optional[str] = Field(default="", description="Task description")
+    priority: int = Field(default=2, ge=1, le=3, description="Priority (1=High, 2=Medium, 3=Low)")
+    status: str = Field(default="todo", description="Status (todo, in_progress, done, cancelled)")
+    due_date: Optional[str] = Field(default=None, description="Due date ISO string (YYYY-MM-DD)")
+    created_at: Optional[str] = None
+    completed_at: Optional[str] = None
+
+
+class WellbeingLogItem(BaseModel):
+    """
+    Physical, cognitive, or emotional wellbeing event log.
+    """
+    id: Optional[int] = None
+    user_id: Optional[int] = None
+    state_type: str = Field(..., description="State category (e.g. PEAK_CLARITY, BRAIN_FOG, LOW_ENERGY, ANXIETY)")
+    triggers: List[str] = Field(default_factory=list, description="Triggers or catalysts")
+    symptoms: List[str] = Field(default_factory=list, description="Observed symptoms")
+    notes: Optional[str] = Field(default="", description="Reflections and observations")
+    created_at: Optional[str] = None
+
+
+class ExperimentItem(BaseModel):
+    """
+    Sprint or A/B test habit experiment model.
+    """
+    id: Optional[int] = None
+    user_id: Optional[int] = None
+    title: str = Field(..., description="Experiment title")
+    type: str = Field(default="SPRINT", description="Type: SPRINT or AB_TEST")
+    phase: str = Field(default="PHASE_A", description="Phase: PHASE_A, PHASE_B, COMPLETED")
+    duration_days: int = Field(default=14, description="Duration in days")
+    start_date: Optional[str] = None
+    end_date: Optional[str] = None
+    hypothesis_a: str = Field(..., description="Primary hypothesis / Protocol A")
+    hypothesis_b: Optional[str] = Field(default="", description="Protocol B for A/B tests")
+    daily_actions: List[str] = Field(default_factory=list, description="Daily actionable steps")
+    status: str = Field(default="active", description="Status: active, completed, cancelled")
+    created_at: Optional[str] = None
+

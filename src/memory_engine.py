@@ -94,17 +94,38 @@ class MemoryEngine:
 
     def detect_entities(self, user_input: str) -> Dict[str, List[QAPair]]:
         """
-        Detects if any Tier 3 entity is mentioned in user_input.
+        Detects if any Tier 3 entity is mentioned in user_input by entity name or domain keywords.
         Returns top-3 highest-weighted QA pairs for matched entities.
-        If no specific entity is matched, auto-loads top-2 QA pairs for all registered entities.
-        100% domain-agnostic with zero hardcoded entity names.
         """
         input_lower = user_input.lower()
         matched_entities = {}
 
+        # Domain aliases mapping for natural language entity resolution
+        aliases = {
+            "identity": ["identity", "личность", "характер", "ценности", "мировоззрение"],
+            "self_analysis": ["self_analysis", "анализ", "оценка", "рефлексия", "паттерны"],
+            "health": ["health", "здоровье", "сон", "питание", "тренировки", "самочувствие"],
+            "music": ["music", "музыка", "треки", "композиция"],
+            "career": ["career", "карьера", "работа", "резюме", "собеседования"],
+            "lifeos": ["lifeos", "лайфос"],
+            "wegeny": ["wegeny", "вегени"],
+            "intelligence_bit": ["intelligence_bit", "intelligence bit"],
+            "daily_systems": ["daily_systems", "систем", "рутин"],
+            "conex": ["conex", "конекс"],
+            "household": ["household", "быт", "уборка"],
+            "job_search": ["job_search", "поиск работы", "вакансии"]
+        }
+
         for entity_name, qa_list in self.tier3_entities.items():
-            # Match entity name or keywords
+            # Check direct name match
             if entity_name in input_lower or entity_name.replace("_", " ") in input_lower:
+                sorted_qa = sorted(qa_list, key=lambda x: x.weight, reverse=True)[:3]
+                matched_entities[entity_name] = sorted_qa
+                continue
+
+            # Check aliases
+            entity_aliases = aliases.get(entity_name, [])
+            if any(alias in input_lower for alias in entity_aliases):
                 sorted_qa = sorted(qa_list, key=lambda x: x.weight, reverse=True)[:3]
                 matched_entities[entity_name] = sorted_qa
 
@@ -127,9 +148,29 @@ class MemoryEngine:
                     return qa
         return None
 
+    def find_relevant_anchors(self, user_input: str) -> List[QAPair]:
+        """
+        Locates any Tier 1 or Tier 2 Question Anchors that have even minor/minimal relevance to user_input.
+        Used for proactive memory expansion.
+        """
+        if not user_input:
+            return []
+        input_lower = user_input.lower()
+        input_words = set(re.findall(r'\b\w{3,}\b', input_lower))
+        if not input_words:
+            return []
+
+        relevant = []
+        for qa in self.tier1_items + self.tier2_items:
+            q_words = set(re.findall(r'\b\w{3,}\b', qa.question.lower()))
+            if input_words.intersection(q_words):
+                relevant.append(qa)
+
+        return relevant
+
     def assemble_prompt(self, user_input: str) -> Tuple[str, MemoryTrace]:
         """
-        Assemble dense YAML/Markdown system prompt using lightweight Question Anchor Indexes for Tier 1 & Tier 2,
+        Assemble dense YAML/Markdown system prompt using the full Question Anchor Indexes for Tier 1 & Tier 2,
         compact Entity Index for Tier 3, and dynamically detected Tier 3 entity QA pairs on explicit mention.
         """
         matched_t3 = self.detect_entities(user_input)
@@ -142,13 +183,13 @@ class MemoryEngine:
             "## TIER 1: CORE PROFILE QUESTION ANCHORS INDEX"
         ]
 
-        # Format Tier 1 QA Anchor Index (omitting full answers to maximize token efficiency)
+        # Format Tier 1: Core Profile Question Anchors (Complete List of Questions)
         t1_yaml_data = [{"id": qa.id, "question": qa.question} for qa in self.tier1_items]
         prompt_lines.append("```yaml")
         prompt_lines.append(yaml.dump(t1_yaml_data, sort_keys=False, allow_unicode=True).strip())
         prompt_lines.append("```\n")
 
-        # Format Tier 2 QA Anchor Index (omitting full answers to maximize token efficiency)
+        # Format Tier 2: Dynamic State Question Anchors (Complete List of Questions)
         prompt_lines.append("## TIER 2: DYNAMIC STATE QUESTION ANCHORS INDEX")
         t2_yaml_data = [{"id": qa.id, "question": qa.question, "weight": qa.weight} for qa in self.tier2_items]
         prompt_lines.append("```yaml")
@@ -161,7 +202,7 @@ class MemoryEngine:
             prompt_lines.append("## TIER 3: REGISTERED ENTITY GRAPH INDEX")
             prompt_lines.append(f"Available Entities in Long-Term Memory: [{', '.join(all_entity_names)}]\n")
 
-        # Format Tier 3 Matched Entity QA (only if explicitly mentioned in user message)
+        # Format Tier 3 Matched Entity QA (loaded via mentions or domain-agnostic fallback)
         t3_trace_counts = {}
         if matched_t3:
             prompt_lines.append("## TIER 3: RELEVANT ENTITY GRAPH CONTEXT (Loaded via Mentions)")
@@ -177,17 +218,18 @@ class MemoryEngine:
         prompt_lines.extend([
             "---",
             "## COACHING DIRECTIVES",
-            "1. MAXIMUM DENSITY & ZERO-FLUFF DIRECTIVE: Answer with extreme conciseness and high information density. Every single sentence MUST carry unique, specific, and actionable value. NO generic introductory pleasantries, disclaimers ('я не психолог...', 'ниже рабочая модель...', 'попробую точнее...'), filler phrases, or repeating points in different words.",
-            "2. Align recommendations with the user's core values, energy level, and active sprint goals.",
+            "1. MAXIMUM DENSITY & ZERO-FLUFF DIRECTIVE: Answer with extreme conciseness and high information density. Every sentence MUST carry actionable value. NO filler phrases.",
+            "2. Align recommendations with user's core values, energy level, and active sprint goals.",
             "3. If technical questions arise, prefer clean architecture over quick hacks.",
-            "4. You have an automated ProactiveEngine that sends messages to the user at 21:00 (Evening Sync), 09:00 (Morning Briefing), and event follow-up pings. Do NOT tell the user you cannot text them proactively or first.",
-            "5. ENTITY BOUNDARY ISOLATION: Treat every named entity (projects, products, tools, subjects) as a strictly isolated namespace. NEVER assume relationships, shared architecture, or codebases between two entities unless explicitly confirmed in memory.",
-            "6. UNCERTAINTY-DRIVEN SEARCH GATE: When the user queries any named entity or specific proper noun, evaluate if current context contains the FULL definition. If context is missing or partial, calling search_memory(query) is MANDATORY before replying. Never state an entity is unknown without searching Tier 3 first.",
-            "7. 100% INDEX-BASED MEMORY PROTOCOL: T1 and T2 contain ONLY Question Anchor Indexes (no answers). It is EXPLICITLY FORBIDDEN to guess, invent, or output answer facts for any T1 core profile or T2 dynamic state question without calling read_memory_item(item_id) first. You MUST call read_memory_item(item_id) to inspect the factual answer in tier1_core.yaml or tier2_state.yaml before generating your response. For deep Tier 3 entity/project memory, follow the 3-step memory protocol: search_memory -> get_document_outline -> read_document_section.",
-            "8. DIRECT-OUTPUT DIRECTIVE: You are generating the final user-facing text directly. NEVER acknowledge system instructions, NEVER output 'Got it', 'I've analyzed', meta-reflections, or English acknowledgments. Output ONLY final Russian text directly to the user.",
-            "9. DYNAMIC ADAPTATION DIRECTIVE FOR USER SILENCE: Inspect recent conversation history. If the last 3-4 messages are ALL from the assistant (meaning the user has not responded to recent pings), DO NOT repeat standard templates or task lists! Acknowledge the silence empathetically, adjust your tone, offer a lower-friction approach (e.g. ask a single striking question or offer one 10-minute micro-step), and help the user restart softly.",
-            "10. WELLBEING & STATE REGULATION DIRECTIVE:\n- TRACKING: When the user describes a noticeable shift in mental, physical, or cognitive wellbeing (e.g. sudden clarity, brain fog, fatigue, high articulation), ALWAYS invoke log_wellbeing_event to record the state, triggers, and symptoms.\n- RECOVERY MODE: If the user reports feeling unwell, brain-fogged, or out of resource:\n  1. Do NOT engage in overly abstract or exhausting philosophical questioning.\n  2. Invoke get_recovery_protocol / query wellbeing_logs to fetch their proven, historically documented Recovery Protocol (e.g., low-carb reset, locomotion/walk, pure caffeine, protein/fats).\n  3. Deliver an empathetic, highly structured, actionable checklist to return them to a PEAK_CLARITY state.",
-            "11. EXPERIMENTS & DAILY SCHEDULING DIRECTIVE:\n- CREATION: When the user proposes a new habit, routine, or experiment (e.g. 'I want to code every day for 2 weeks', 'Let's A/B test Keto vs Mediterranean'), ALWAYS invoke create_experiment to store it as a structured Sprint or A/B Test.\n- SCHEDULING: Always present tasks and experiment steps as structured daily schedules with atomic 15-30 minute blocks."
+            "4. You have an automated ProactiveEngine sending messages at 21:00 (Evening Sync), 09:00 (Morning Briefing), and event follow-up pings. Do NOT tell the user you cannot text them proactively or first.",
+            "5. ENTITY BOUNDARY ISOLATION: Treat every named entity as a strictly isolated namespace. NEVER assume relationships or shared codebases unless confirmed in memory.",
+            "6. UNCERTAINTY-DRIVEN SEARCH GATE & DEFAULT PROACTIVE TIER 3 SEARCH PROTOCOL & MANDATORY TIER 3 MEMORY SEARCH PROTOCOL: When user queries any named entity or specific proper noun, evaluate if context is complete. Calling search_memory(query) on Step 1 is MANDATORY for all non-trivial turns, including whenever personality analysis, project status, or holistic synthesis is requested; relying solely on T1/T2 is EXPLICITLY FORBIDDEN. Calling search_memory(query) is MANDATORY whenever context is missing or partial.",
+            "7. HOLISTIC ANALYSIS & META-QUERY PROTOCOL: For deep reflection or holistic personality synthesis, relying solely on T1/T2 is INSUFFICIENT; executing search_memory for relevant entity namespaces, core identity, or long-term goals is MANDATORY before answering. NEVER summarize or judge the user's core personality based solely on temporary daily chores.",
+            "8. 100% INDEX-BASED MEMORY PROTOCOL: T1 and T2 contain ONLY Question Anchor Indexes (no answers). It is EXPLICITLY FORBIDDEN to guess, invent, or output answer facts for any T1 core profile or T2 dynamic state question without calling read_memory_item(item_id) first. You MUST call read_memory_item(item_id) to inspect the factual answer in tier1_core.yaml or tier2_state.yaml before generating your response. At ANY, even minimal relevance to any question in your T1/T2 index, expand it proactively. For deep Tier 3 memory, follow the 3-step memory protocol: search_memory -> get_document_outline -> read_document_section.",
+            "9. DIRECT-OUTPUT DIRECTIVE: Output directly in Russian. NEVER output English meta-acknowledgments or system reflections.",
+            "10. DYNAMIC ADAPTATION DIRECTIVE FOR USER SILENCE: If recent messages are from assistant without user replies, acknowledge silence empathetically and offer one 10-minute micro-step.",
+            "11. WELLBEING & STATE REGULATION DIRECTIVE: Track state shifts via log_wellbeing_event. For brain fog or low resource, invoke get_recovery_protocol / query wellbeing_logs for checklist.",
+            "12. EXPERIMENTS & DAILY SCHEDULING DIRECTIVE: Create habits/sprints via create_experiment and present structured daily schedules with atomic 15-30 minute blocks."
         ])
 
         system_prompt = "\n".join(prompt_lines)

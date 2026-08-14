@@ -105,7 +105,41 @@ def init_db() -> bool:
                 CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks (status, project_id);
             """)
 
-            # 3. Tier 3 memory index table with FTS tsvector and optional vector column
+            # 5. Wellbeing logs table
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS wellbeing_logs (
+                    id SERIAL PRIMARY KEY,
+                    user_id BIGINT,
+                    state_type VARCHAR(50) NOT NULL,
+                    triggers JSONB,
+                    symptoms JSONB,
+                    notes TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE INDEX IF NOT EXISTS idx_wellbeing_user_state ON wellbeing_logs (user_id, state_type, created_at DESC);
+            """)
+
+            # 6. Sprints and Experiments table
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS sprints_and_experiments (
+                    id SERIAL PRIMARY KEY,
+                    user_id BIGINT,
+                    title VARCHAR(255) NOT NULL,
+                    type VARCHAR(50) NOT NULL,
+                    phase VARCHAR(50) DEFAULT 'PHASE_A',
+                    duration_days INT DEFAULT 14,
+                    start_date DATE DEFAULT CURRENT_DATE,
+                    end_date DATE,
+                    hypothesis_a TEXT,
+                    hypothesis_b TEXT,
+                    daily_actions JSONB NOT NULL,
+                    status VARCHAR(20) DEFAULT 'active',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE INDEX IF NOT EXISTS idx_experiments_user_status ON sprints_and_experiments (user_id, status, type);
+            """)
+
+            # 7. Tier 3 memory index table with FTS tsvector and optional vector column
             if has_pgvector:
                 cur.execute("""
                     CREATE TABLE IF NOT EXISTS tier3_memory_index (
@@ -161,27 +195,27 @@ def save_scheduled_ping(user_id: int, scheduled_at_iso: str, event_type: str, co
         "status": "pending",
         "created_at": datetime.datetime.now().isoformat()
     }
-    _in_memory_scheduled_pings.append(ping_data)
 
+    inserted_id = ping_data["id"]
     conn = _get_connection()
-    if not conn:
-        return ping_data["id"]
+    if conn:
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO scheduled_pings (user_id, scheduled_at, event_type, context_text, status)
+                    VALUES (%s, %s, %s, %s, 'pending')
+                    RETURNING id;
+                """, (user_id, scheduled_at_iso, event_type or "event_followup", context_text))
+                inserted_id = cur.fetchone()[0]
+                conn.commit()
+                ping_data["id"] = inserted_id
+        except Exception as e:
+            logger.warning(f"Failed to save scheduled ping to PostgreSQL: {e}")
+        finally:
+            conn.close()
 
-    try:
-        with conn.cursor() as cur:
-            cur.execute("""
-                INSERT INTO scheduled_pings (user_id, scheduled_at, event_type, context_text, status)
-                VALUES (%s, %s, %s, %s, 'pending')
-                RETURNING id;
-            """, (user_id, scheduled_at_iso, event_type or "event_followup", context_text))
-            inserted_id = cur.fetchone()[0]
-            conn.commit()
-            return inserted_id
-    except Exception as e:
-        logger.warning(f"Failed to save scheduled ping to PostgreSQL: {e}")
-        return ping_data["id"]
-    finally:
-        conn.close()
+    _in_memory_scheduled_pings.append(ping_data)
+    return inserted_id
 
 def get_due_pings(target_user_id: Optional[int] = None) -> List[Dict[str, Any]]:
     """Retrieve pending pings scheduled at or before NOW()."""
@@ -207,7 +241,7 @@ def get_due_pings(target_user_id: Optional[int] = None) -> List[Dict[str, Any]]:
                         ORDER BY scheduled_at ASC;
                     """, (now,))
                 rows = cur.fetchall()
-                if rows:
+                if rows is not None:
                     return [
                         {
                             "id": r[0],
@@ -537,7 +571,7 @@ def search_tier3_memory(query: str, top_k: int = 10) -> str:
     if not results:
         return f"No long-term memory candidate entries found matching '{clean_query}'."
 
-    output_lines = [f"Found {len(results)} candidate memory entries matching '{clean_query}'. (To inspect without reading full text, call get_document_outline(entity) or read_document_section(entity, section_id)):\n"]
+    output_lines = [f"Found {len(results)} candidate Tier 3 Memory entries matching '{clean_query}'. (To inspect without reading full text, call get_document_outline(entity) or read_document_section(entity, section_id)):\n"]
     for idx, item in enumerate(results, 1):
         sec_id = item.get('id', idx)
         output_lines.append(
@@ -917,9 +951,8 @@ def delete_tier3_memory_by_keyword(keyword: str) -> int:
             """, (like_pattern, like_pattern, like_pattern, like_pattern))
             deleted_count = cur.rowcount
             conn.commit()
-            db_deleted = delete_tier3_memory_by_keyword(clean_kw)
-            logger.info(f"PostgreSQL Tier 3 deletion for '{clean_kw}' removed {db_deleted} DB rows.")
-            return db_deleted
+            logger.info(f"PostgreSQL Tier 3 deletion for '{clean_kw}' removed {deleted_count} DB rows.")
+            return deleted_count
     except Exception as e:
         logger.warning(f"Failed to delete Tier 3 memory from PostgreSQL: {e}")
         return 0

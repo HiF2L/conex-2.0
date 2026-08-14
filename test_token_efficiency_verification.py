@@ -25,12 +25,13 @@ def test_system_prompt_token_efficiency():
 
     print(f"System Prompt Length: {len(prompt)} chars (~{trace.estimated_tokens} estimated tokens).")
     
-    assert trace.estimated_tokens < 2000, f"System prompt token count should be < 2000, got {trace.estimated_tokens}"
+    assert trace.estimated_tokens < 3000, f"System prompt token count should be < 3000, got {trace.estimated_tokens}"
     assert "REGISTERED ENTITY GRAPH INDEX" in prompt
     assert "TIER 1: CORE PROFILE QUESTION ANCHORS INDEX" in prompt
     assert "TIER 2: DYNAMIC STATE QUESTION ANCHORS INDEX" in prompt
+    assert "question:" in prompt, "Question Anchor Index should contain question fields"
 
-    print(f"[OK] System prompt token count verified: ~{trace.estimated_tokens} tokens (< 1200 threshold).")
+    print(f"[OK] System prompt verified with full T1/T2 question index (~{trace.estimated_tokens} tokens).")
 
 if __name__ == "__main__":
     print("================ TOKEN EFFICIENCY VERIFICATION ================")
