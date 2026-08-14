@@ -12,3 +12,8 @@ __pycache__/
 # IDE
 .vscode/
 .idea/
+
+# Memory and runtime state data
+data/memory/*
+!data/memory/.gitkeep
+!data/memory/**/.gitkeep
