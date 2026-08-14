@@ -406,15 +406,33 @@ class LLMClient:
                     if iteration == 0 and is_non_trivial:
                         curr_tool_choice = {"type": "function", "function": {"name": "search_memory"}}
 
-                    response = self.client.chat.completions.create(
-                        model=self.default_model,
-                        messages=messages,
-                        tools=tools,
-                        tool_choice=curr_tool_choice,
-                        temperature=0.7
-                    )
+                    try:
+                        response = self.client.chat.completions.create(
+                            model=self.default_model,
+                            messages=messages,
+                            tools=tools,
+                            tool_choice=curr_tool_choice,
+                            temperature=0.7
+                        )
+                    except Exception as primary_e:
+                        logger.warning(f"Tool-enabled API call failed with tool_choice={curr_tool_choice}: {primary_e}. Retrying with tool_choice='auto'...")
+                        try:
+                            response = self.client.chat.completions.create(
+                                model=self.default_model,
+                                messages=messages,
+                                tools=tools,
+                                tool_choice="auto",
+                                temperature=0.7
+                            )
+                        except Exception as auto_e:
+                            logger.warning(f"Tool-enabled API call with tool_choice='auto' failed: {auto_e}. Retrying direct completion without tools...")
+                            response = self.client.chat.completions.create(
+                                model=self.default_model,
+                                messages=messages,
+                                temperature=0.7
+                            )
 
-                    if not response.choices:
+                    if not response or not response.choices:
                         break
 
                     choice = response.choices[0]
@@ -864,10 +882,14 @@ class LLMClient:
 
     def transcribe_audio(self, file_path: str) -> str:
         """
-        Transcribe audio file using ProxyAPI STT endpoint (https://api.proxyapi.ru/openai/v1) with gpt-4o-mini-transcribe.
+        Transcribes voice messages via Dedicated STT (ProxyAPI gpt-4o-mini-transcribe / whisper-1)
+        with fallback to Main Provider (provod.ai) Whisper endpoint.
         """
-        stt_api_ready = bool(self.stt_api_key and self.stt_api_key != "your_proxyapi_key_here")
-        if stt_api_ready:
+        if not os.path.exists(file_path):
+            logger.error(f"Audio file not found for transcription: {file_path}")
+            return ""
+
+        if self.stt_api_key and self.stt_api_key != "your_proxyapi_key_here":
             try:
                 with open(file_path, "rb") as audio_file:
                     transcript = self.stt_client.audio.transcriptions.create(
@@ -898,27 +920,93 @@ class LLMClient:
 
     def _generate_offline_coaching_response(self, system_prompt: str, user_input: str) -> str:
         """
-        Simulate thoughtful Senior Friend & Coach response offline.
+        Generates structured, Russian-language Senior Friend & Coach responses
+        when API is offline or temporarily unreachable.
         """
         lower_input = user_input.lower()
-        if "lifeos" in lower_input:
+
+        # 1. Morning Briefing intent
+        if any(w in lower_input for w in ["утренний брифинг", "доброе утро", "morning briefing", "план на сегодня"]):
+            tasks_block = ""
+            if "ТОП-3 КЛЮЧЕВЫЕ ЗАДАЧИ" in system_prompt:
+                match = re.search(r"(ТОП-3 КЛЮЧЕВЫЕ ЗАДАЧИ[^\n]*(?:\n\s*-[^\n]+)*)", system_prompt)
+                if match:
+                    tasks_block = match.group(1).strip()
+            
+            exp_block = ""
+            if "АКТИВНЫЕ СПРИНТЫ" in system_prompt:
+                match_exp = re.search(r"(АКТИВНЫЕ СПРИНТЫ[^\n]*(?:\n\s*-[^\n]+)*)", system_prompt)
+                if match_exp:
+                    exp_block = match_exp.group(1).strip()
+
+            lines = [
+                "Доброе утро, Виталик! Фокусируемся на главном и держим системный темп.",
+                "",
+                "📋 **4 правила системности на сегодня**:",
+                "1. 🚀 **1 проектный шаг** (WeGeny / Intelligence Bit) — сделай до полудня.",
+                "2. 🧹 **Бытовой порядок** — 15 минут на ключевые зоны.",
+                "3. 🚶 **1 час прогулки / движения** — перезагрузка мышления и ясность.",
+                "4. 💼 **Карьерный отклик / шаг** — регулярность важнее объема.",
+            ]
+            if tasks_block:
+                lines.extend(["", f"🎯 **{tasks_block}**"])
+            if exp_block:
+                lines.extend(["", f"🔬 **{exp_block}**"])
+            
+            lines.extend([
+                "",
+                "С какого первого 25-минутного блока начинаем?"
+            ])
+            return "\n".join(lines)
+
+        # 2. Evening Sync intent
+        elif any(w in lower_input for w in ["вечерн", "итоги дня", "evening sync", "синхронизац"]):
+            tasks_block = ""
+            if "ФОКУС-ЗАДАЧИ" in system_prompt:
+                match = re.search(r"(ФОКУС-ЗАДАЧИ[^\n]*(?:\n\s*-[^\n]+)*)", system_prompt)
+                if match:
+                    tasks_block = match.group(1).strip()
+
+            lines = [
+                "Добрый вечер! Подведем краткие итоги дня.",
+                "",
+                "📊 **Чек-ин по 4 правилам системности**:",
+                "1. Проектный шаг закрыт?",
+                "2. Бытовые рутины выполнены?",
+                "3. Прогулка / физическая активность состоялась?",
+                "4. Карьерный фокус удержан?",
+            ]
+            if tasks_block:
+                lines.extend(["", f"🎯 **{tasks_block}**"])
+
+            lines.extend([
+                "",
+                "Что сегодня дало максимум энергии, а что заблокировало? Зафиксируй **1 атомарный шаг (15–30 мин)** на завтра."
+            ])
+            return "\n".join(lines)
+
+        # 3. LifeOS intent
+        elif "lifeos" in lower_input:
             return (
-                "Regarding **LifeOS**, your 3-tier memory setup (Core Profile + Rolling State + Dynamic Entity Graph) "
-                "is extremely token efficient. Since Tier 3 entity QA pairs are loaded dynamically, we keep context tight. "
-                "How are you feeling about the Telegram bot deployment so far?"
+                "По **LifeOS**: архитектура памяти и системные циклы активны. "
+                "Все 3 уровня памяти (Core Profile, Rolling State, Entity Graph) синхронизированы. "
+                "Какой следующий компонент или сценарий оптимизируем?"
             )
-        elif "energy" in lower_input or "tired" in lower_input or "sprint" in lower_input:
+
+        # 4. Energy / Wellbeing / Sprint intent
+        elif any(w in lower_input for w in ["энерги", "устал", "ресурс", "спринт", "energy", "sprint"]):
             return (
-                "I notice you're reflecting on your current sprint and energy. "
-                "As an architectural thinker who hates overengineering, let's keep your focus sharp on the essential core. "
-                "What single milestone will yield 80% of the value today?"
+                "Вижу запрос по состоянию и фокусу. "
+                "Главное правило при снижении ресурса — снизить трение и не усложнять. "
+                "Давай выделим ровно один ключевой шаг на 15–20 минут, который даст максимальный результат."
             )
+
+        # 5. General intelligent coach fallback
         else:
             return (
-                f"Got it, Vitalik. I've analyzed: '{user_input}'. "
-                "Based on your core values (direct feedback, clean architecture, no fluff), "
-                "let's ensure this aligns with your current sprint goals while keeping system overhead low. "
-                "What's the next step you'd like to execute?"
+                f"Принято по теме: «{user_input}».\n\n"
+                "Держим фокус на чистой архитектуре и реальных результатах без лишнего шума. "
+                "Какой конкретный шаг сейчас в приоритете?"
             )
 
     def _rule_based_memory_extractor(self, text: str, current_date: Optional[str] = None) -> MemoryDiff:
