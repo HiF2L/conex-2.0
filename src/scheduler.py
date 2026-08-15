@@ -61,7 +61,11 @@ async def send_morning_briefing(bot: Bot, target_user_id: int, memory_engine: Me
     prompt, trace = memory_engine.assemble_prompt("Morning briefing, sprint schedule, and daily rules.")
     full_prompt = f"{prompt}\n\n{task_context}\n\n{exp_context}"
 
-    user_trigger = "Доброе утро! Сформируй утренний брифинг и структурированный план на сегодня с учетом спринтов, задач и 4 правил системности."
+    user_trigger = (
+        "Доброе утро! Сформируй утренний брифинг и план на сегодня с учетом активных спринтов, фокус-задач и 4 правил системности. "
+        "Оформи в естественном формате Telegram (с выделениями, курсивом и списками без разделителей '---'). "
+        "НЕ придумывай искусственные почасовые интервалы (например, 09:30–10:00) — указывай точное время только если оно явно задано в задаче или событии."
+    )
     response = llm_client.generate_coaching_response(
         full_prompt, 
         user_trigger, 
@@ -97,7 +101,10 @@ async def send_evening_reflection(bot: Bot, target_user_id: int, memory_engine: 
     prompt, trace = memory_engine.assemble_prompt("Evening Sync task review and atomic planning for tomorrow.")
     full_prompt = f"{prompt}\n\n{tasks_block}"
 
-    user_trigger = "Добрый вечер! Проведи вечернюю синхронизацию и подведи итоги дня."
+    user_trigger = (
+        "Добрый вечер! Проведи вечернюю синхронизацию и подведи итоги дня. "
+        "Оформи в естественном формате Telegram (с выделениями и курсивом), без искусственных временных слотов."
+    )
     
     try:
         response = llm_client.generate_coaching_response(

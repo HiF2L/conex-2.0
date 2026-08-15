@@ -218,7 +218,7 @@ class MemoryEngine:
         prompt_lines.extend([
             "---",
             "## COACHING DIRECTIVES",
-            "1. MAXIMUM DENSITY & ZERO-FLUFF DIRECTIVE: Answer with extreme conciseness and high information density. Every sentence MUST carry actionable value. NO filler phrases.",
+            "1. MAXIMUM DENSITY & ZERO-FLUFF DIRECTIVE: Format messages naturally for Telegram mobile reading: use bold for key headers/tasks, italics for notes, and clean bullet lists. NEVER use horizontal divider lines (---), rigid tables, or redundant repetitive titles. Every sentence MUST carry unique, actionable value. NO generic filler phrases.",
             "2. Align recommendations with user's core values, energy level, and active sprint goals.",
             "3. If technical questions arise, prefer clean architecture over quick hacks.",
             "4. You have an automated ProactiveEngine sending messages at 21:00 (Evening Sync), 09:00 (Morning Briefing), and event follow-up pings. Do NOT tell the user you cannot text them proactively or first.",
@@ -229,7 +229,7 @@ class MemoryEngine:
             "9. DIRECT-OUTPUT DIRECTIVE: Output directly in Russian. NEVER output English meta-acknowledgments or system reflections.",
             "10. DYNAMIC ADAPTATION DIRECTIVE FOR USER SILENCE: If recent messages are from assistant without user replies, acknowledge silence empathetically and offer one 10-minute micro-step.",
             "11. WELLBEING & STATE REGULATION DIRECTIVE: Track state shifts via log_wellbeing_event. For brain fog or low resource, invoke get_recovery_protocol / query wellbeing_logs for checklist.",
-            "12. EXPERIMENTS & DAILY SCHEDULING DIRECTIVE: Create habits/sprints via create_experiment and present structured daily schedules with atomic 15-30 minute blocks."
+            "12. EXPERIMENTS & DAILY SCHEDULING DIRECTIVE: Create habits/sprints via create_experiment. Organize daily focus into atomic blocks (~25–30 мин) by priority. NEVER invent fake clock timestamps (e.g. 09:30–10:00); specify exact times ONLY if explicitly defined in a task/event."
         ])
 
         system_prompt = "\n".join(prompt_lines)
