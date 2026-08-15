@@ -131,3 +131,17 @@ class ExperimentItem(BaseModel):
     status: str = Field(default="active", description="Status: active, completed, cancelled")
     created_at: Optional[str] = None
 
+
+class LifeRuleItem(BaseModel):
+    """
+    Life principle and personal productivity axiom model.
+    """
+    id: Optional[int] = None
+    domain: str = Field(..., description="Domain: productivity, nutrition, mental_health, chores, career")
+    rule_name: str = Field(..., description="Short identifier or name of the rule")
+    rule_text: str = Field(..., description="Core principle or rule text")
+    anti_pattern: Optional[str] = Field(default="", description="Observed negative pattern / failure mode")
+    actionable_remedy: Optional[str] = Field(default="", description="Concrete remedy or standard operating procedure")
+    is_active: bool = Field(default=True, description="Whether rule is currently active")
+    created_at: Optional[str] = None
+

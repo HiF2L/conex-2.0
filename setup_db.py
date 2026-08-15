@@ -173,6 +173,21 @@ def setup_database():
                 CREATE INDEX IF NOT EXISTS idx_experiments_user_status ON sprints_and_experiments (user_id, status, type);
             """)
 
+            # Create life_rules table
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS life_rules (
+                    id SERIAL PRIMARY KEY,
+                    domain VARCHAR(50) NOT NULL,
+                    rule_name VARCHAR(100) NOT NULL,
+                    rule_text TEXT NOT NULL,
+                    anti_pattern TEXT,
+                    actionable_remedy TEXT,
+                    is_active BOOLEAN DEFAULT TRUE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE INDEX IF NOT EXISTS idx_life_rules_domain_active ON life_rules (domain, is_active);
+            """)
+
             # Create tier3_memory_index table
             if has_pgvector:
                 cur.execute("""

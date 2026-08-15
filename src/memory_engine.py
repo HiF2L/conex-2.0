@@ -229,7 +229,10 @@ class MemoryEngine:
             "9. DIRECT-OUTPUT DIRECTIVE: Output directly in Russian. NEVER output English meta-acknowledgments or system reflections.",
             "10. DYNAMIC ADAPTATION DIRECTIVE FOR USER SILENCE: If recent messages are from assistant without user replies, acknowledge silence empathetically and offer one 10-minute micro-step.",
             "11. WELLBEING & STATE REGULATION DIRECTIVE: Track state shifts via log_wellbeing_event. For brain fog or low resource, invoke get_recovery_protocol / query wellbeing_logs for checklist.",
-            "12. EXPERIMENTS & DAILY SCHEDULING DIRECTIVE: Create habits/sprints via create_experiment. Organize daily focus into atomic blocks (~25–30 мин) by priority. NEVER invent fake clock timestamps (e.g. 09:30–10:00); specify exact times ONLY if explicitly defined in a task/event."
+            "12. EXPERIMENTS & DAILY SCHEDULING DIRECTIVE: Create habits/sprints via create_experiment. Organize daily focus into atomic blocks (~25–30 мин) by priority. NEVER invent fake clock timestamps (e.g. 09:30–10:00); specify exact times ONLY if explicitly defined in a task/event.",
+            "13. LIFE PRINCIPLES & PRODUCTIVITY AXIOMS DIRECTIVE:\n"
+            "   - REFLECTION EXTRACTION: When the user dissects a productive or unproductive day/event, extract underlying systemic insights and invoke save_life_rule to preserve the axiom.\n"
+            "   - GROUNDED ADVICE: When the user shares a personal struggle, confusion, or breakdown, query get_active_rules first and ground all feedback in their own established, documented rules rather than generic advice."
         ])
 
         system_prompt = "\n".join(prompt_lines)

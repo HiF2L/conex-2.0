@@ -33,7 +33,7 @@ async def send_morning_briefing(bot: Bot, target_user_id: int, memory_engine: Me
     memory_engine.apply_decay()
 
     # 2. Fetch sliding chat history (last 8 turns) to detect user silence & adapt tone
-    from src.db import get_recent_chat_history, get_top_focus_tasks_db, get_active_experiments_db
+    from src.db import get_recent_chat_history, get_top_focus_tasks_db, get_active_experiments_db, get_active_rules_db
     chat_history = get_recent_chat_history(target_user_id, limit=8)
 
     # 3. Fetch top-3 focus tasks
@@ -57,9 +57,26 @@ async def send_morning_briefing(bot: Bot, target_user_id: int, memory_engine: Me
     else:
         exp_context = "АКТИВНЫЕ СПРИНТЫ И A/B ЭКСПЕРИМЕНТЫ: Нет активных экспериментов."
 
-    # 5. Assemble morning prompt & trace
+    # 5. Fetch active Life Rules & Productivity Axioms
+    active_rules = get_active_rules_db()
+    if active_rules:
+        rule_lines = []
+        for r in active_rules:
+            extra = f" (Remedy: {r.get('actionable_remedy')})" if r.get('actionable_remedy') else ""
+            rule_lines.append(f"- [{r.get('domain', 'productivity').upper()}] {r.get('rule_name')}: {r.get('rule_text')}{extra}")
+        rules_context = "АКТИВНЫЕ ЖИЗНЕННЫЕ ПРАВИЛА И АКСИОМЫ ПРОДУКТИВНОСТИ:\n" + "\n".join(rule_lines)
+    else:
+        rules_context = "АКТИВНЫЕ ЖИЗНЕННЫЕ ПРАВИЛА: Соблюдай стандартные правила системности."
+
+    # 6. Assemble morning prompt & trace
     prompt, trace = memory_engine.assemble_prompt("Morning briefing, sprint schedule, and daily rules.")
-    full_prompt = f"{prompt}\n\n{task_context}\n\n{exp_context}"
+    enforcement_instructions = (
+        "СТРОГИЕ ПРАВИЛА СОСТАВЛЕНИЯ УТРЕННЕГО ПЛАНА:\n"
+        "1. Никаких сложных бытовых дел/готовки до первого блока глубокой работы (Deep Work).\n"
+        "2. Уборка строго ограничена микро-спринтами 10–15 минут на одну зону.\n"
+        "3. Zero-Choice формулировки задач (без двусмысленности вроде 'Вариант А или Вариант Б')."
+    )
+    full_prompt = f"{prompt}\n\n{task_context}\n\n{exp_context}\n\n{rules_context}\n\n{enforcement_instructions}"
 
     user_trigger = (
         "Доброе утро! Сформируй утренний брифинг и план на сегодня с учетом активных спринтов, фокус-задач и 4 правил системности. "

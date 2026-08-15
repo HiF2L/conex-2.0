@@ -139,7 +139,22 @@ def init_db() -> bool:
                 CREATE INDEX IF NOT EXISTS idx_experiments_user_status ON sprints_and_experiments (user_id, status, type);
             """)
 
-            # 7. Tier 3 memory index table with FTS tsvector and optional vector column
+            # 7. Life Rules table
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS life_rules (
+                    id SERIAL PRIMARY KEY,
+                    domain VARCHAR(50) NOT NULL,
+                    rule_name VARCHAR(100) NOT NULL,
+                    rule_text TEXT NOT NULL,
+                    anti_pattern TEXT,
+                    actionable_remedy TEXT,
+                    is_active BOOLEAN DEFAULT TRUE,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE INDEX IF NOT EXISTS idx_life_rules_domain_active ON life_rules (domain, is_active);
+            """)
+
+            # 8. Tier 3 memory index table with FTS tsvector and optional vector column
             if has_pgvector:
                 cur.execute("""
                     CREATE TABLE IF NOT EXISTS tier3_memory_index (
@@ -959,11 +974,12 @@ def delete_tier3_memory_by_keyword(keyword: str) -> int:
     finally:
         conn.close()
 
-# In-memory fallback storage for projects, tasks, wellbeing logs, and experiments
+# In-memory fallback storage for projects, tasks, wellbeing logs, experiments, and life rules
 _in_memory_projects: List[Dict[str, Any]] = []
 _in_memory_tasks: List[Dict[str, Any]] = []
 _in_memory_wellbeing_logs: List[Dict[str, Any]] = []
 _in_memory_experiments: List[Dict[str, Any]] = []
+_in_memory_life_rules: List[Dict[str, Any]] = []
 
 def create_experiment_db(
     title: str,
@@ -1358,6 +1374,145 @@ def get_recovery_protocol_db(current_state: str = "BRAIN_FOG", user_id: Optional
         f"\n🎯 *Focus on completing step 1 and step 2 right now before taking on heavy cognitive work.*"
     )
     return protocol_md
+
+def save_life_rule_db(
+    domain: str, 
+    rule_name: str, 
+    rule_text: str, 
+    anti_pattern: str = "", 
+    actionable_remedy: str = ""
+) -> Dict[str, Any]:
+    """
+    Save or update a personal life rule, operating principle, or productivity axiom.
+    """
+    clean_domain = (domain or "productivity").strip().lower()
+    clean_name = rule_name.strip()
+    clean_text = rule_text.strip()
+    clean_anti = anti_pattern.strip()
+    clean_remedy = actionable_remedy.strip()
+
+    conn = _get_connection()
+    if conn:
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    INSERT INTO life_rules (domain, rule_name, rule_text, anti_pattern, actionable_remedy, is_active)
+                    VALUES (%s, %s, %s, %s, %s, TRUE)
+                    RETURNING id, domain, rule_name, rule_text, anti_pattern, actionable_remedy, is_active, created_at;
+                """, (clean_domain, clean_name, clean_text, clean_anti, clean_remedy))
+                row = cur.fetchone()
+                conn.commit()
+                if row:
+                    return {
+                        "id": row[0],
+                        "domain": row[1],
+                        "rule_name": row[2],
+                        "rule_text": row[3],
+                        "anti_pattern": row[4] or "",
+                        "actionable_remedy": row[5] or "",
+                        "is_active": row[6],
+                        "created_at": row[7].isoformat() if hasattr(row[7], "isoformat") else str(row[7])
+                    }
+        except Exception as e:
+            logger.error(f"Failed to insert life rule into PostgreSQL: {e}")
+            if conn:
+                conn.rollback()
+        finally:
+            conn.close()
+
+    # In-memory fallback
+    rule_item = {
+        "id": len(_in_memory_life_rules) + 1,
+        "domain": clean_domain,
+        "rule_name": clean_name,
+        "rule_text": clean_text,
+        "anti_pattern": clean_anti,
+        "actionable_remedy": clean_remedy,
+        "is_active": True,
+        "created_at": datetime.datetime.now().isoformat()
+    }
+    _in_memory_life_rules.append(rule_item)
+    return rule_item
+
+def get_active_rules_db(domain: Optional[str] = None) -> List[Dict[str, Any]]:
+    """
+    Fetch active life rules and productivity axioms, optionally filtered by domain.
+    """
+    clean_domain = domain.strip().lower() if domain else None
+    conn = _get_connection()
+    if conn:
+        try:
+            with conn.cursor() as cur:
+                if clean_domain:
+                    cur.execute("""
+                        SELECT id, domain, rule_name, rule_text, anti_pattern, actionable_remedy, is_active, created_at
+                        FROM life_rules
+                        WHERE is_active = TRUE AND domain = %s
+                        ORDER BY id ASC;
+                    """, (clean_domain,))
+                else:
+                    cur.execute("""
+                        SELECT id, domain, rule_name, rule_text, anti_pattern, actionable_remedy, is_active, created_at
+                        FROM life_rules
+                        WHERE is_active = TRUE
+                        ORDER BY domain, id ASC;
+                    """)
+                rows = cur.fetchall()
+                results = []
+                for row in rows:
+                    results.append({
+                        "id": row[0],
+                        "domain": row[1],
+                        "rule_name": row[2],
+                        "rule_text": row[3],
+                        "anti_pattern": row[4] or "",
+                        "actionable_remedy": row[5] or "",
+                        "is_active": row[6],
+                        "created_at": row[7].isoformat() if hasattr(row[7], "isoformat") else str(row[7])
+                    })
+                return results
+        except Exception as e:
+            logger.error(f"Failed to fetch active life rules from PostgreSQL: {e}")
+        finally:
+            conn.close()
+
+    # In-memory fallback
+    results = []
+    for r in _in_memory_life_rules:
+        if r.get("is_active", True):
+            if clean_domain is None or r.get("domain") == clean_domain:
+                results.append(r)
+    return results
+
+def toggle_life_rule_db(rule_id: int, is_active: bool) -> bool:
+    """
+    Enable or disable a life rule by ID.
+    """
+    conn = _get_connection()
+    if conn:
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    UPDATE life_rules
+                    SET is_active = %s
+                    WHERE id = %s;
+                """, (is_active, rule_id))
+                updated = cur.rowcount > 0
+                conn.commit()
+                return updated
+        except Exception as e:
+            logger.error(f"Failed to toggle life rule #{rule_id} in PostgreSQL: {e}")
+            if conn:
+                conn.rollback()
+        finally:
+            conn.close()
+
+    # In-memory fallback
+    for r in _in_memory_life_rules:
+        if r.get("id") == rule_id:
+            r["is_active"] = is_active
+            return True
+    return False
 
 def create_project_db(name: str, description: str = "") -> Dict[str, Any]:
     """Create a new project in PostgreSQL with in-memory fallback."""

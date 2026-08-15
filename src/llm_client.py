@@ -380,12 +380,66 @@ class LLMClient:
             }
         }
 
+        save_life_rule_tool = {
+            "type": "function",
+            "function": {
+                "name": "save_life_rule",
+                "description": "Save or update a personal life rule, operating principle, or productivity axiom in PostgreSQL across domains (productivity, nutrition, mental_health, chores, career).",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "domain": {
+                            "type": "string",
+                            "enum": ["productivity", "nutrition", "mental_health", "chores", "career"],
+                            "description": "Domain of the rule"
+                        },
+                        "rule_name": {
+                            "type": "string",
+                            "description": "Short memorable title or rule name"
+                        },
+                        "rule_text": {
+                            "type": "string",
+                            "description": "Core principle or rule text"
+                        },
+                        "anti_pattern": {
+                            "type": "string",
+                            "description": "Observed failure mode or anti-pattern to avoid"
+                        },
+                        "actionable_remedy": {
+                            "type": "string",
+                            "description": "Concrete remedy, workaround, or SOP"
+                        }
+                    },
+                    "required": ["domain", "rule_name", "rule_text"]
+                }
+            }
+        }
+
+        get_active_rules_tool = {
+            "type": "function",
+            "function": {
+                "name": "get_active_rules",
+                "description": "Query active personal life rules, principles, and productivity axioms from PostgreSQL. Optionally filter by domain.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "domain": {
+                            "type": "string",
+                            "enum": ["productivity", "nutrition", "mental_health", "chores", "career"],
+                            "description": "Optional domain filter"
+                        }
+                    }
+                }
+            }
+        }
+
         tools = [
             search_tool, forget_tool, create_project_tool, create_task_tool, 
             complete_task_tool, list_tasks_tool, delete_task_tool, update_task_tool,
             get_document_outline_tool, read_document_section_tool, search_in_document_tool, read_memory_entry_tool,
             read_memory_item_tool, log_wellbeing_event_tool, get_recovery_protocol_tool,
-            create_experiment_tool, get_active_experiments_tool, advance_experiment_phase_tool
+            create_experiment_tool, get_active_experiments_tool, advance_experiment_phase_tool,
+            save_life_rule_tool, get_active_rules_tool
         ]
 
         if self.is_api_configured():
@@ -737,6 +791,37 @@ class LLMClient:
                                 success = False
                             logger.info(f"LLM triggered tool update_task: success={success}")
                             messages.append({"role": "tool", "tool_call_id": tool_call.id, "content": f"Task update result: {success}"})
+
+                        elif fn_name == "save_life_rule":
+                            from src.db import save_life_rule_db
+                            try:
+                                args = json.loads(tool_call.function.arguments)
+                                rule_res = save_life_rule_db(
+                                    domain=args.get("domain", "productivity"),
+                                    rule_name=args.get("rule_name", ""),
+                                    rule_text=args.get("rule_text", ""),
+                                    anti_pattern=args.get("anti_pattern", ""),
+                                    actionable_remedy=args.get("actionable_remedy", "")
+                                )
+                            except Exception as re_err:
+                                rule_res = {"error": str(re_err)}
+                            logger.info(f"LLM triggered tool save_life_rule: {rule_res}")
+                            if trace and hasattr(trace, "debug_steps"):
+                                trace.debug_steps.append(f"• 📜 `save_life_rule(\"{args.get('rule_name', '')}\")` -> ID #{rule_res.get('id')}")
+                            messages.append({"role": "tool", "tool_call_id": tool_call.id, "content": json.dumps(rule_res, ensure_ascii=False)})
+
+                        elif fn_name == "get_active_rules":
+                            from src.db import get_active_rules_db
+                            try:
+                                args = json.loads(tool_call.function.arguments)
+                                domain_arg = args.get("domain")
+                                rules = get_active_rules_db(domain=domain_arg)
+                            except Exception as ge_err:
+                                rules = []
+                            logger.info(f"LLM triggered tool get_active_rules: found {len(rules)} rules")
+                            if trace and hasattr(trace, "debug_steps"):
+                                trace.debug_steps.append(f"• 📜 `get_active_rules(\"{args.get('domain', 'all')}\")` -> Found {len(rules)} rules")
+                            messages.append({"role": "tool", "tool_call_id": tool_call.id, "content": json.dumps(rules, ensure_ascii=False)})
 
             except Exception as e:
                 logger.warning(f"API call failed: {e}. Falling back to offline simulator.")
