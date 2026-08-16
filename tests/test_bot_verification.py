@@ -9,7 +9,7 @@ from pathlib import Path
 from aiogram import Router, Bot
 
 # Add root directory to path
-sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.models import QAPair, MemoryDiff
 from src.memory_engine import MemoryEngine

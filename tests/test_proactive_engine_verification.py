@@ -7,7 +7,7 @@ import datetime
 from pathlib import Path
 
 # Add root directory to sys.path
-sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.proactive_engine import ProactiveEngine
 from src.db import save_scheduled_ping, get_due_pings, mark_ping_status, get_pings_count_today

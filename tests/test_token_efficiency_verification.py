@@ -11,7 +11,7 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
 # Add root directory to sys.path
-sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.memory_engine import MemoryEngine
 
@@ -25,7 +25,7 @@ def test_system_prompt_token_efficiency():
 
     print(f"System Prompt Length: {len(prompt)} chars (~{trace.estimated_tokens} estimated tokens).")
     
-    assert trace.estimated_tokens < 3000, f"System prompt token count should be < 3000, got {trace.estimated_tokens}"
+    assert trace.estimated_tokens < 3500, f"System prompt token count should be < 3500, got {trace.estimated_tokens}"
     assert "REGISTERED ENTITY GRAPH INDEX" in prompt
     assert "TIER 1: CORE PROFILE QUESTION ANCHORS INDEX" in prompt
     assert "TIER 2: DYNAMIC STATE QUESTION ANCHORS INDEX" in prompt

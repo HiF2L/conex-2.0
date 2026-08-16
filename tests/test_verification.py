@@ -15,7 +15,7 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != 'utf-8':
         pass
 
 # Add project root to path
-sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.models import QAPair, MemoryDiff, MemoryTrace
 from src.memory_engine import MemoryEngine

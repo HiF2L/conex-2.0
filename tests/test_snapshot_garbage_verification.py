@@ -7,7 +7,7 @@ import datetime
 from pathlib import Path
 
 # Add root directory to path
-sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.models import QAPair
 from src.memory_engine import MemoryEngine

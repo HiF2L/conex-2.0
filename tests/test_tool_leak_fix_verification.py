@@ -7,7 +7,7 @@ import datetime
 from pathlib import Path
 
 # Add root directory to sys.path
-sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from src.llm_client import LLMClient
 from src.db import (
