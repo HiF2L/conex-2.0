@@ -75,7 +75,11 @@ def test_llm_tools_and_prompt_directives():
     prompt, trace = engine.assemble_prompt("I want to try keto for 2 weeks")
     assert "EXPERIMENTS & DAILY SCHEDULING DIRECTIVE" in prompt
     assert "create_experiment" in prompt
-    print("[OK] System Prompt directives for Experiment Engine verified.")
+    assert "MANDATORY ON-DEMAND SCHEDULING TOOL-CHAINING" in prompt
+    assert "get_active_rules(domain='productivity')" in prompt
+    assert "list_tasks(status='todo')" in prompt
+    assert "get_active_experiments()" in prompt
+    print("[OK] System Prompt directives for Experiment Engine and On-Demand Daily Scheduling Tool-Chaining verified.")
 
 if __name__ == "__main__":
     print("================ EXPERIMENT ENGINE VERIFICATION ================")
