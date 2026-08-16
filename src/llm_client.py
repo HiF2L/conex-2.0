@@ -479,10 +479,11 @@ class LLMClient:
                                 temperature=0.7
                             )
                         except Exception as auto_e:
-                            logger.warning(f"Tool-enabled API call with tool_choice='auto' failed: {auto_e}. Retrying direct completion without tools...")
+                            logger.warning(f"Tool-enabled API call with tool_choice='auto' failed: {auto_e}. Retrying direct completion with flattened context...")
+                            flat_msgs = self._flatten_messages_for_direct_completion(messages)
                             response = self.client.chat.completions.create(
                                 model=self.default_model,
-                                messages=messages,
+                                messages=flat_msgs,
                                 temperature=0.7
                             )
 
@@ -495,8 +496,25 @@ class LLMClient:
                             return self._sanitize_tool_leak(choice.message.content.strip())
                         break
 
-                    # Append model's tool call message
-                    messages.append(choice.message)
+                    # Append model's tool call message with safe content string for proxy compatibility
+                    msg_dict = {
+                        "role": "assistant",
+                        "content": choice.message.content or "",
+                        "tool_calls": [
+                            {
+                                "id": tc.id,
+                                "type": "function",
+                                "function": {
+                                    "name": tc.function.name,
+                                    "arguments": tc.function.arguments
+                                }
+                            }
+                            for tc in choice.message.tool_calls
+                        ] if choice.message.tool_calls else None
+                    }
+                    if not msg_dict["tool_calls"]:
+                        del msg_dict["tool_calls"]
+                    messages.append(msg_dict)
 
                     for tool_call in choice.message.tool_calls:
                         fn_name = tool_call.function.name
@@ -823,11 +841,57 @@ class LLMClient:
                                 trace.debug_steps.append(f"• 📜 `get_active_rules(\"{args.get('domain', 'all')}\")` -> Found {len(rules)} rules")
                             messages.append({"role": "tool", "tool_call_id": tool_call.id, "content": json.dumps(rules, ensure_ascii=False)})
 
+                # If loop ended after tool calls but no final content was emitted:
+                if len(messages) > 1 and any((isinstance(m, dict) and m.get("role") == "tool") for m in messages):
+                    try:
+                        flat_msgs = self._flatten_messages_for_direct_completion(messages)
+                        final_res = self.client.chat.completions.create(
+                            model=self.default_model,
+                            messages=flat_msgs,
+                            temperature=0.7
+                        )
+                        if final_res and final_res.choices and final_res.choices[0].message.content:
+                            return self._sanitize_tool_leak(final_res.choices[0].message.content.strip())
+                    except Exception as synth_e:
+                        logger.warning(f"Final synthesis call failed: {synth_e}")
+
             except Exception as e:
                 logger.warning(f"API call failed: {e}. Falling back to offline simulator.")
 
         # Offline / Fallback Response
         return self._sanitize_tool_leak(self._generate_offline_coaching_response(system_prompt, user_input))
+
+    def _flatten_messages_for_direct_completion(self, messages_list: List[Dict[str, Any]]) -> List[Dict[str, str]]:
+        """Converts structured tool call/response message traces into clean, standard user/assistant turns."""
+        flattened: List[Dict[str, str]] = []
+        tool_outputs: List[str] = []
+        for m in messages_list:
+            if isinstance(m, dict):
+                role = m.get("role")
+                content = m.get("content") or ""
+                if role in ["system", "user"]:
+                    flattened.append({"role": role, "content": str(content)})
+                elif role == "assistant":
+                    if content:
+                        flattened.append({"role": "assistant", "content": str(content)})
+                elif role == "tool":
+                    tool_outputs.append(str(content))
+            elif hasattr(m, "role"):
+                if m.role in ["system", "user"]:
+                    flattened.append({"role": m.role, "content": str(m.content or "")})
+                elif m.role == "assistant" and m.content:
+                    flattened.append({"role": "assistant", "content": str(m.content)})
+
+        if tool_outputs and flattened:
+            injected = "\n\n[ДАННЫЕ ИЗ БАЗЫ ПАМЯТИ]:\n" + "\n---\n".join(tool_outputs) + "\n\nПожалуйста, ответь на вопрос/запрос пользователя с учетом этих данных."
+            for idx in range(len(flattened) - 1, -1, -1):
+                if flattened[idx]["role"] == "user":
+                    flattened[idx]["content"] += injected
+                    break
+            else:
+                flattened.append({"role": "user", "content": injected})
+
+        return flattened
 
     def _format_for_telegram(self, text: str) -> str:
         """
@@ -1166,7 +1230,32 @@ class LLMClient:
                 "Давай выделим ровно один ключевой шаг на 15–20 минут, который даст максимальный результат."
             )
 
-        # 5. General intelligent coach fallback
+        # 5. Life Rules & Productivity Axioms intent
+        elif any(w in lower_input for w in ["правил", "аксиом", "принцип", "каркас"]):
+            from src.db import get_active_rules_db
+            rules = get_active_rules_db()
+            lines = ["**Твои активные правила и аксиомы системности**:"]
+            
+            # 4 core system rules
+            lines.extend([
+                "",
+                "**4 базовых правила системности**:",
+                "• **1 проектный шаг** (WeGeny / Intelligence Bit) — главный фокус дня.",
+                "• **Уборка 4 зон** — 10–15 минут микро-спринт на одну зону.",
+                "• **Walk & Think** — 1 час на улице без гаджетов для ясности мышления.",
+                "• **Карьерный отклик / шаг** — регулярность важнее объема."
+            ])
+            
+            if rules:
+                lines.extend(["", "**Аксиомы из базы данных**:"])
+                for r in rules:
+                    extra = f" (_Решение: {r.get('actionable_remedy')}_)" if r.get('actionable_remedy') else ""
+                    lines.append(f"• **{r.get('rule_name')}** [{r.get('domain', 'productivity')}]: {r.get('rule_text')}{extra}")
+
+            lines.extend(["", "Какое из этих правил сейчас требует приоритетного фокуса?"])
+            return "\n".join(lines)
+
+        # 6. General intelligent coach fallback
         else:
             return (
                 f"Принято по теме: «{user_input}».\n\n"
