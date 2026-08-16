@@ -1,4 +1,10 @@
+<div align="center">
+
 # 🧠 Conex 2.0 / LifeOS: Autonomous AI Coach & Memory Operating System
+
+**[ English | [Русский](README.ru.md) ]**
+
+</div>
 
 Conex 2.0 (LifeOS) is a personal AI Agent ("Senior Friend & Coach") designed for high-density cognitive leverage, proactive accountability, and lifelong memory continuity.
 
@@ -76,7 +82,8 @@ graph TD
 ├── .env.example             # Environment configuration template
 ├── .gitignore               # Excludes personal runtime YAMLs & caches
 ├── requirements.txt         # Python dependencies
-├── README.md                # Documentation
+├── README.md                # Documentation (English)
+├── README.ru.md             # Documentation (Russian)
 ├── data/
 │   └── memory/              # Memory storage directory
 │       ├── .gitkeep
