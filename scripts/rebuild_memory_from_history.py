@@ -16,7 +16,8 @@ if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
 # Add root directory to sys.path
-sys.path.insert(0, str(Path(__file__).parent))
+ROOT_DIR = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT_DIR))
 
 from src.memory_engine import MemoryEngine
 from src.llm_client import LLMClient
@@ -26,9 +27,9 @@ from src.db import _get_connection, sync_tier3_to_postgres
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger("Memory_Rebuilder")
 
-MEMORY_DIR = Path("data/memory")
+MEMORY_DIR = ROOT_DIR / "data" / "memory"
 TIER3_DIR = MEMORY_DIR / "tier3_entities"
-USER_BRIEF_FILE = Path("data/user_brief.txt")
+USER_BRIEF_FILE = ROOT_DIR / "data" / "user_brief.txt"
 
 def wipe_tier3_memory():
     """Wipes all Tier 3 entity YAML files and PostgreSQL tier3_memory_index table."""

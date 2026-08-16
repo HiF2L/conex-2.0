@@ -75,7 +75,6 @@ graph TD
 .
 ├── .env.example             # Environment configuration template
 ├── .gitignore               # Excludes personal runtime YAMLs & caches
-├── setup_db.py              # PostgreSQL database initialization & migration
 ├── requirements.txt         # Python dependencies
 ├── README.md                # Documentation
 ├── data/
@@ -88,17 +87,23 @@ graph TD
 │       └── tier3_entities/
 │           ├── .gitkeep
 │           └── sample_entity.yaml.example
-└── src/
-    ├── __init__.py
-    ├── bot.py               # Aiogram 3 Telegram bot & voice handlers
-    ├── db.py                # PostgreSQL persistence layer & CRUD helpers
-    ├── extractor_service.py # Async background memory extraction
-    ├── llm_client.py        # LLM client, tool execution & Telegram formatter
-    ├── main.py              # Interactive Rich CLI terminal interface
-    ├── memory_engine.py     # 3-Tier prompt assembly & coaching directives
-    ├── models.py            # Pydantic v2 schemas
-    ├── proactive_engine.py  # Push notification & scheduled ping scheduler
-    └── scheduler.py         # AsyncIO cron jobs (Morning 09:00 & Evening 21:00)
+├── scripts/
+│   ├── __init__.py
+│   ├── setup_db.py          # PostgreSQL database initialization & migration
+│   ├── rebuild_memory_from_history.py # Contextual memory rebuilding from raw history
+│   └── reindex_and_clean_memory.py    # Memory sanitization & deduplication
+├── src/
+│   ├── __init__.py
+│   ├── bot.py               # Aiogram 3 Telegram bot & voice handlers
+│   ├── db.py                # PostgreSQL persistence layer & CRUD helpers
+│   ├── extractor_service.py # Async background memory extraction
+│   ├── llm_client.py        # LLM client, tool execution & Telegram formatter
+│   ├── main.py              # Interactive Rich CLI terminal interface
+│   ├── memory_engine.py     # 3-Tier prompt assembly & coaching directives
+│   ├── models.py            # Pydantic v2 schemas
+│   ├── proactive_engine.py  # Push notification & scheduled ping scheduler
+│   └── scheduler.py         # AsyncIO cron jobs (Morning 09:00 & Evening 21:00)
+└── tests/                   # Full pytest verification test suite (64 tests)
 ```
 
 ---
@@ -157,7 +162,7 @@ cp data/memory/tier3_entities/sample_entity.yaml.example data/memory/tier3_entit
 
 Run database schema setup and sync Tier 3 memory into PostgreSQL:
 ```bash
-python setup_db.py
+python scripts/setup_db.py
 ```
 
 ---
