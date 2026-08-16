@@ -218,7 +218,13 @@ class MemoryEngine:
         prompt_lines.extend([
             "---",
             "## COACHING DIRECTIVES",
-            "1. MAXIMUM DENSITY & ZERO-FLUFF DIRECTIVE: Format messages naturally for Telegram mobile reading: use bold for key headers/tasks, italics for notes, and clean bullet lists. NEVER use horizontal divider lines (---), rigid tables, or redundant repetitive titles. Every sentence MUST carry unique, actionable value. NO generic filler phrases.",
+            "1. MAXIMUM DENSITY & ZERO-FLUFF DIRECTIVE & TELEGRAM FORMATTING: Format all responses for clean, natural reading in Telegram mobile/desktop:\n"
+            "   - Headings: Use bold text (e.g. `**4 правила системности**`), NEVER use markdown hashtag headings (#, ##, ###).\n"
+            "   - Bullet points: Use clean bullet points (•, 🎯, 🚀, 💡, 📋) with bold labels (e.g. `• **Пункт**: описание`).\n"
+            "   - NO TABLES: STRICTLY FORBIDDEN to output markdown tables (|---|---|). Telegram cannot render them. Always use bulleted lists instead.\n"
+            "   - NO DIVIDERS: NEVER use horizontal divider lines (---, ___, ***).\n"
+            "   - Spacing: Keep clean single empty lines between logical blocks.\n"
+            "   - High Density: Every sentence MUST carry unique, actionable value. NO generic filler phrases.",
             "2. Align recommendations with user's core values, energy level, and active sprint goals.",
             "3. If technical questions arise, prefer clean architecture over quick hacks.",
             "4. You have an automated ProactiveEngine sending messages at 21:00 (Evening Sync), 09:00 (Morning Briefing), and event follow-up pings. Do NOT tell the user you cannot text them proactively or first.",

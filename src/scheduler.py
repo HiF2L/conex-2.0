@@ -91,7 +91,7 @@ async def send_morning_briefing(bot: Bot, target_user_id: int, memory_engine: Me
         trace=trace
     )
     
-    full_message = f"🌅 **Morning Briefing (09:00)**\n\n{response}\n\n_🧠 [Memory Trace: T1: {trace.t1_count} Qs | T2: {trace.t2_count} Qs | T3: {trace.t3_sections_read} Secs | ~{trace.estimated_tokens} tokens]_"
+    full_message = f"🌅 **Утренний брифинг**\n\n{response}\n\n_🧠 [Память: T1: {trace.t1_count} Qs | T2: {trace.t2_count} Qs | T3: {trace.t3_sections_read} Secs | ~{trace.estimated_tokens} токенов]_"
 
     await send_safe_bot_message(bot, target_user_id, full_message, parse_mode="Markdown")
 
@@ -142,9 +142,9 @@ async def send_evening_reflection(bot: Bot, target_user_id: int, memory_engine: 
         )
     
     full_message = (
-        f"🌆 **Evening Sync (21:00)**\n\n"
+        f"🌆 **Вечерняя синхронизация**\n\n"
         f"{response}\n\n"
-        f"_🧠 [Memory Trace: T1: {trace.t1_count} Qs | T2: {trace.t2_count} Qs | T3: {trace.t3_sections_read} Secs | ~{trace.estimated_tokens} tokens]_"
+        f"_🧠 [Память: T1: {trace.t1_count} Qs | T2: {trace.t2_count} Qs | T3: {trace.t3_sections_read} Secs | ~{trace.estimated_tokens} токенов]_"
     )
 
     await send_safe_bot_message(bot, target_user_id, full_message, parse_mode="Markdown")

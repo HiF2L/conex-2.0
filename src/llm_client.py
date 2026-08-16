@@ -829,8 +829,85 @@ class LLMClient:
         # Offline / Fallback Response
         return self._sanitize_tool_leak(self._generate_offline_coaching_response(system_prompt, user_input))
 
+    def _format_for_telegram(self, text: str) -> str:
+        """
+        Transforms Markdown into clean, readable Telegram format:
+        1. Converts markdown headers (#, ##, ###) into bold headers (**Heading**).
+        2. Removes ugly horizontal rules (---, ***, ___).
+        3. Converts raw Markdown tables (|---|---|) into structured bullet lists.
+        4. Normalizes whitespace and paragraph spacing.
+        """
+        if not text:
+            return ""
+
+        lines = text.split("\n")
+        processed_lines: List[str] = []
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+            stripped = line.strip()
+
+            # 1. Detect and parse Markdown Tables
+            if stripped.startswith("|") and stripped.endswith("|") and "|" in stripped[1:-1]:
+                table_lines = []
+                while i < len(lines) and lines[i].strip().startswith("|") and lines[i].strip().endswith("|"):
+                    table_lines.append(lines[i].strip())
+                    i += 1
+                
+                # Convert table rows to bullet points
+                parsed_bullets = []
+                for row_idx, tline in enumerate(table_lines):
+                    # Skip separator line (e.g. |---|---|)
+                    if re.match(r"^\|[\s\-:|]+\|$", tline):
+                        continue
+                    # Extract cells
+                    cells = [c.strip() for c in tline.split("|")[1:-1] if c.strip() != ""]
+                    if not cells:
+                        continue
+                    # Skip header row if it contains generic labels
+                    if row_idx == 0 and any(c.lower() in ["#", "№", "id", "правило", "параметр", "шаг", "пункт", "трек", "время"] for c in cells):
+                        continue
+                    
+                    # Filter out leading index numbers (e.g. "1", "2", "3")
+                    if len(cells) > 1 and (cells[0].isdigit() or cells[0] in ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"]):
+                        cells = cells[1:]
+                    
+                    if len(cells) == 1:
+                        parsed_bullets.append(f"• **{cells[0]}**")
+                    elif len(cells) == 2:
+                        parsed_bullets.append(f"• **{cells[0]}**: {cells[1]}")
+                    elif len(cells) >= 3:
+                        extra = f" ({cells[2]})" if cells[2] else ""
+                        parsed_bullets.append(f"• **{cells[0]}**: {cells[1]}{extra}")
+
+                if parsed_bullets:
+                    processed_lines.extend(parsed_bullets)
+                continue
+
+            # 2. Strip horizontal divider lines
+            if re.match(r"^(\s*[-*_]\s*){3,}$", stripped):
+                i += 1
+                continue
+
+            # 3. Convert markdown headers (###, ##, #) to bold
+            header_match = re.match(r"^(#{1,6})\s+(.+)$", stripped)
+            if header_match:
+                title = header_match.group(2).strip()
+                title = re.sub(r"^\*\*(.+)\*\*$", r"\1", title)
+                processed_lines.append(f"**{title}**")
+                i += 1
+                continue
+
+            processed_lines.append(line)
+            i += 1
+
+        result = "\n".join(processed_lines)
+        # Collapse 3+ newlines to 2
+        result = re.sub(r"\n{3,}", "\n\n", result)
+        return result
+
     def _sanitize_tool_leak(self, text: str) -> str:
-        """Removes leaked raw tool call syntax (e.g. to=func_name ..., to=functions.xyz, {"query": ...}) from text responses."""
+        """Removes leaked raw tool call syntax and formats text cleanly for Telegram."""
         if not text:
             return ""
         # Strip patterns like `to=function_name ...` or `to=functions.xyz ...`
@@ -839,6 +916,9 @@ class LLMClient:
         cleaned = re.sub(r"to=functions\.\w+[^\n]*", "", cleaned)
         # Strip standalone raw JSON tool call leaks (e.g. {"query": "..."})
         cleaned = re.sub(r'^\s*\{\s*"(query|target_tier|keyword|identifier|title|project_name)"\s*:.*?\n?', "", cleaned, flags=re.MULTILINE)
+        
+        # Telegram formatting post-processing
+        cleaned = self._format_for_telegram(cleaned)
         return cleaned.strip()
 
     def extract_memory_diff(
