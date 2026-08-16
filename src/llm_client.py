@@ -456,36 +456,22 @@ class LLMClient:
 
                 # Multi-step tool execution loop (up to 4 steps)
                 for iteration in range(4):
-                    curr_tool_choice = "auto"
-                    if iteration == 0 and is_non_trivial:
-                        curr_tool_choice = {"type": "function", "function": {"name": "search_memory"}}
-
                     try:
                         response = self.client.chat.completions.create(
                             model=self.default_model,
                             messages=messages,
                             tools=tools,
-                            tool_choice=curr_tool_choice,
+                            tool_choice="auto",
                             temperature=0.7
                         )
                     except Exception as primary_e:
-                        logger.warning(f"Tool-enabled API call failed with tool_choice={curr_tool_choice}: {primary_e}. Retrying with tool_choice='auto'...")
-                        try:
-                            response = self.client.chat.completions.create(
-                                model=self.default_model,
-                                messages=messages,
-                                tools=tools,
-                                tool_choice="auto",
-                                temperature=0.7
-                            )
-                        except Exception as auto_e:
-                            logger.warning(f"Tool-enabled API call with tool_choice='auto' failed: {auto_e}. Retrying direct completion with flattened context...")
-                            flat_msgs = self._flatten_messages_for_direct_completion(messages)
-                            response = self.client.chat.completions.create(
-                                model=self.default_model,
-                                messages=flat_msgs,
-                                temperature=0.7
-                            )
+                        logger.warning(f"Tool-enabled API call with tool_choice='auto' failed: {primary_e}. Retrying direct completion with flattened context...")
+                        flat_msgs = self._flatten_messages_for_direct_completion(messages)
+                        response = self.client.chat.completions.create(
+                            model=self.default_model,
+                            messages=flat_msgs,
+                            temperature=0.7
+                        )
 
                     if not response or not response.choices:
                         break
@@ -911,37 +897,36 @@ class LLMClient:
             line = lines[i]
             stripped = line.strip()
 
-            # 1. Detect and parse Markdown Tables
+            # 1. Detect and parse Markdown Tables (GFM standard: header row + separator row + data rows)
             if stripped.startswith("|") and stripped.endswith("|") and "|" in stripped[1:-1]:
                 table_lines = []
                 while i < len(lines) and lines[i].strip().startswith("|") and lines[i].strip().endswith("|"):
                     table_lines.append(lines[i].strip())
                     i += 1
                 
-                # Convert table rows to bullet points
+                # Check if row 1 is a markdown table separator (e.g. |---|---|)
+                has_separator = len(table_lines) > 1 and bool(re.match(r"^\|[\s\-:|]+\|$", table_lines[1]))
+                data_start_idx = 2 if has_separator else 1
+                
                 parsed_bullets = []
-                for row_idx, tline in enumerate(table_lines):
-                    # Skip separator line (e.g. |---|---|)
+                for row_idx in range(data_start_idx, len(table_lines)):
+                    tline = table_lines[row_idx]
                     if re.match(r"^\|[\s\-:|]+\|$", tline):
                         continue
-                    # Extract cells
                     cells = [c.strip() for c in tline.split("|")[1:-1] if c.strip() != ""]
                     if not cells:
                         continue
-                    # Skip header row if it contains generic labels
-                    if row_idx == 0 and any(c.lower() in ["#", "№", "id", "правило", "параметр", "шаг", "пункт", "трек", "время"] for c in cells):
-                        continue
                     
-                    # Filter out leading index numbers (e.g. "1", "2", "3")
-                    if len(cells) > 1 and (cells[0].isdigit() or cells[0] in ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10"]):
+                    # If leading cell is an index number, strip it
+                    if len(cells) > 1 and cells[0].isdigit():
                         cells = cells[1:]
                     
                     if len(cells) == 1:
                         parsed_bullets.append(f"• **{cells[0]}**")
                     elif len(cells) == 2:
                         parsed_bullets.append(f"• **{cells[0]}**: {cells[1]}")
-                    elif len(cells) >= 3:
-                        extra = f" ({cells[2]})" if cells[2] else ""
+                    else:
+                        extra = f" ({', '.join(cells[2:])})"
                         parsed_bullets.append(f"• **{cells[0]}**: {cells[1]}{extra}")
 
                 if parsed_bullets:
@@ -1149,119 +1134,65 @@ class LLMClient:
 
     def _generate_offline_coaching_response(self, system_prompt: str, user_input: str) -> str:
         """
-        Generates structured, Russian-language Senior Friend & Coach responses
-        when API is offline or temporarily unreachable.
+        Generic domain-driven offline response generator.
+        Dynamically aggregates context from storage layers (memory search, active rules,
+        tasks, experiments, wellbeing logs) without fragile keyword if-else branches.
         """
-        lower_input = user_input.lower()
+        from src.db import (
+            search_tier3_memory,
+            get_active_rules_db,
+            get_top_focus_tasks_db,
+            get_active_experiments_db,
+            get_wellbeing_history_db
+        )
 
-        # 1. Morning Briefing intent
-        if any(w in lower_input for w in ["утренний брифинг", "доброе утро", "morning briefing", "план на сегодня"]):
-            tasks_block = ""
-            if "ТОП-3 КЛЮЧЕВЫЕ ЗАДАЧИ" in system_prompt:
-                match = re.search(r"(ТОП-3 КЛЮЧЕВЫЕ ЗАДАЧИ[^\n]*(?:\n\s*-[^\n]+)*)", system_prompt)
-                if match:
-                    tasks_block = match.group(1).strip()
-            
-            exp_block = ""
-            if "АКТИВНЫЕ СПРИНТЫ" in system_prompt:
-                match_exp = re.search(r"(АКТИВНЫЕ СПРИНТЫ[^\n]*(?:\n\s*-[^\n]+)*)", system_prompt)
-                if match_exp:
-                    exp_block = match_exp.group(1).strip()
+        # 1. Dynamic context retrieval
+        search_hits = search_tier3_memory(user_input, top_k=3)
+        active_rules = get_active_rules_db()
+        top_tasks, _ = get_top_focus_tasks_db(limit=3)
+        active_experiments = get_active_experiments_db()
+        recent_wellbeing = get_wellbeing_history_db(limit=1)
 
-            lines = [
-                "Доброе утро, Виталик! Фокусируемся на главном и держим системный темп.",
-                "",
-                "📋 **4 правила системности на сегодня**:",
-                "1. 🚀 **1 проектный шаг** (WeGeny / Intelligence Bit) — сделай до полудня.",
-                "2. 🧹 **Бытовой порядок** — 15 минут на ключевые зоны.",
-                "3. 🚶 **1 час прогулки / движения** — перезагрузка мышления и ясность.",
-                "4. 💼 **Карьерный отклик / шаг** — регулярность важнее объема.",
-            ]
-            if tasks_block:
-                lines.extend(["", f"🎯 **{tasks_block}**"])
-            if exp_block:
-                lines.extend(["", f"🔬 **{exp_block}**"])
-            
-            lines.extend([
-                "",
-                "С какого первого 25-минутного блока начинаем?"
-            ])
-            return "\n".join(lines)
+        # 2. Build structured response blocks dynamically
+        response_sections = []
 
-        # 2. Evening Sync intent
-        elif any(w in lower_input for w in ["вечерн", "итоги дня", "evening sync", "синхронизац"]):
-            tasks_block = ""
-            if "ФОКУС-ЗАДАЧИ" in system_prompt:
-                match = re.search(r"(ФОКУС-ЗАДАЧИ[^\n]*(?:\n\s*-[^\n]+)*)", system_prompt)
-                if match:
-                    tasks_block = match.group(1).strip()
+        # If relevant memory facts exist
+        if search_hits and "Ничего не найдено" not in search_hits:
+            facts = []
+            for line in search_hits.strip().split("\n"):
+                if line.startswith("- [") or line.startswith("• "):
+                    facts.append(line.strip())
+            if facts:
+                response_sections.append("**Контекст из базы знаний**:\n" + "\n".join(facts[:4]))
 
-            lines = [
-                "Добрый вечер! Подведем краткие итоги дня.",
-                "",
-                "📊 **Чек-ин по 4 правилам системности**:",
-                "1. Проектный шаг закрыт?",
-                "2. Бытовые рутины выполнены?",
-                "3. Прогулка / физическая активность состоялась?",
-                "4. Карьерный фокус удержан?",
-            ]
-            if tasks_block:
-                lines.extend(["", f"🎯 **{tasks_block}**"])
+        # Dynamic Life Rules / Systems block
+        if active_rules:
+            rule_bullets = []
+            for r in active_rules[:4]:
+                remedy = f" (_Решение: {r.get('actionable_remedy')}_)" if r.get("actionable_remedy") else ""
+                rule_bullets.append(f"• **{r.get('rule_name')}** [{r.get('domain', 'productivity')}]: {r.get('rule_text')}{remedy}")
+            response_sections.append("**Активные правила и аксиомы**:\n" + "\n".join(rule_bullets))
 
-            lines.extend([
-                "",
-                "Что сегодня дало максимум энергии, а что заблокировало? Зафиксируй **1 атомарный шаг (15–30 мин)** на завтра."
-            ])
-            return "\n".join(lines)
+        # Dynamic Sprints / Experiments block
+        if active_experiments:
+            exp_bullets = [f"• **{e.get('title')}** (Фаза: {e.get('phase', 'ACTIVE')})" for e in active_experiments[:3]]
+            response_sections.append("**Текущие спринты и эксперименты**:\n" + "\n".join(exp_bullets))
 
-        # 3. LifeOS intent
-        elif "lifeos" in lower_input:
+        # Dynamic Tasks block
+        if top_tasks:
+            task_bullets = [f"• [P{t.get('priority', 2)}] **{t.get('title')}**" for t in top_tasks]
+            response_sections.append("**Фокус-задачи**:\n" + "\n".join(task_bullets))
+
+        # Default fallback if no context blocks
+        if not response_sections:
             return (
-                "По **LifeOS**: архитектура памяти и системные циклы активны. "
-                "Все 3 уровня памяти (Core Profile, Rolling State, Entity Graph) синхронизированы. "
-                "Какой следующий компонент или сценарий оптимизируем?"
+                f"Запрос принят к исполнению: «{user_input}».\n\n"
+                "Системные контуры активны. Какой приоритетный шаг зафиксируем сейчас?"
             )
 
-        # 4. Energy / Wellbeing / Sprint intent
-        elif any(w in lower_input for w in ["энерги", "устал", "ресурс", "спринт", "energy", "sprint"]):
-            return (
-                "Вижу запрос по состоянию и фокусу. "
-                "Главное правило при снижении ресурса — снизить трение и не усложнять. "
-                "Давай выделим ровно один ключевой шаг на 15–20 минут, который даст максимальный результат."
-            )
-
-        # 5. Life Rules & Productivity Axioms intent
-        elif any(w in lower_input for w in ["правил", "аксиом", "принцип", "каркас"]):
-            from src.db import get_active_rules_db
-            rules = get_active_rules_db()
-            lines = ["**Твои активные правила и аксиомы системности**:"]
-            
-            # 4 core system rules
-            lines.extend([
-                "",
-                "**4 базовых правила системности**:",
-                "• **1 проектный шаг** (WeGeny / Intelligence Bit) — главный фокус дня.",
-                "• **Уборка 4 зон** — 10–15 минут микро-спринт на одну зону.",
-                "• **Walk & Think** — 1 час на улице без гаджетов для ясности мышления.",
-                "• **Карьерный отклик / шаг** — регулярность важнее объема."
-            ])
-            
-            if rules:
-                lines.extend(["", "**Аксиомы из базы данных**:"])
-                for r in rules:
-                    extra = f" (_Решение: {r.get('actionable_remedy')}_)" if r.get('actionable_remedy') else ""
-                    lines.append(f"• **{r.get('rule_name')}** [{r.get('domain', 'productivity')}]: {r.get('rule_text')}{extra}")
-
-            lines.extend(["", "Какое из этих правил сейчас требует приоритетного фокуса?"])
-            return "\n".join(lines)
-
-        # 6. General intelligent coach fallback
-        else:
-            return (
-                f"Принято по теме: «{user_input}».\n\n"
-                "Держим фокус на чистой архитектуре и реальных результатах без лишнего шума. "
-                "Какой конкретный шаг сейчас в приоритете?"
-            )
+        header = "Синхронизация по активному системному контексту:"
+        footer = "На чем фокусируем следующий 25-минутный рабочий спринт?"
+        return f"{header}\n\n" + "\n\n".join(response_sections) + f"\n\n{footer}"
 
     def _rule_based_memory_extractor(self, text: str, current_date: Optional[str] = None) -> MemoryDiff:
         """
