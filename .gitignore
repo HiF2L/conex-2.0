@@ -13,7 +13,12 @@ __pycache__/
 .vscode/
 .idea/
 
-# Memory and runtime state data
-data/memory/*
+# Memory and runtime state data (personal data excluded)
+data/memory/*.yaml
+data/memory/**/*.yaml
+data/memory/history/*
+!data/memory/history/.gitkeep
+!data/memory/*.yaml.example
+!data/memory/**/*.yaml.example
 !data/memory/.gitkeep
 !data/memory/**/.gitkeep

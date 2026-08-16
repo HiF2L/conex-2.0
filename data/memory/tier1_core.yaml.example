@@ -1,0 +1,18 @@
+# Tier 1: Core Long-Term Personal Profile & Archetype
+# This file stores enduring personal traits, values, core rules, and cognitive style.
+
+- id: core_identity_values
+  question: "What are the core values, communication preferences, and cognitive style of the user?"
+  answer: "Direct, high-density feedback, clean software architecture, zero-fluff. Values action and systematic progress over speculation."
+  weight: 1.0
+  confidence: 1.0
+  origin: "user_initial_setup"
+  valid_from: "2026-08-01"
+
+- id: core_long_term_goals
+  question: "What are the long-term goals and strategic vision of the user?"
+  answer: "Building autonomous AI systems, high-leverage products, and maintaining peak physical and mental energy."
+  weight: 1.0
+  confidence: 1.0
+  origin: "user_initial_setup"
+  valid_from: "2026-08-01"

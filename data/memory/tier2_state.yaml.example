@@ -1,0 +1,18 @@
+# Tier 2: Dynamic Rolling State & Current Context (Decays over time)
+# This file tracks recent energy levels, active habits, sprints, and current cognitive bandwidth.
+
+- id: state_energy_recent
+  question: "What is the user's current energy state, sleep quality, and cognitive focus?"
+  answer: "Phase 1 stabilization: High mental clarity with 8 hours sleep, morning movement, and deep work focus blocks."
+  weight: 0.95
+  confidence: 0.9
+  origin: "daily_sync"
+  valid_from: "2026-08-15"
+
+- id: state_active_habits
+  question: "What are the active daily rules and habits the user is executing?"
+  answer: "4 Core Rules: 1 Project Deep Work Block, 15m Micro-Cleaning Sprint, 1 Hour Walk & Think, 1 Career Application/Outreach."
+  weight: 1.0
+  confidence: 1.0
+  origin: "daily_sync"
+  valid_from: "2026-08-15"

@@ -1,0 +1,18 @@
+# Tier 3: Isolated Entity Knowledge Graph
+# Each entity file in tier3_entities/ represents an isolated project, domain, or knowledge area.
+
+- id: sample_entity_overview
+  question: "What is the primary objective and architecture of Sample Project?"
+  answer: "Sample Project is an autonomous agent system built with FastAPI, Aiogram 3, and PostgreSQL vector search."
+  weight: 0.9
+  confidence: 0.95
+  origin: "initial_setup"
+  valid_from: "2026-08-01"
+
+- id: sample_entity_roadmap
+  question: "What are the immediate milestones and next development steps for Sample Project?"
+  answer: "1. Complete database migrations. 2. Implement proactive reflection engine. 3. Deploy to production server."
+  weight: 0.85
+  confidence: 0.9
+  origin: "initial_setup"
+  valid_from: "2026-08-01"
